@@ -86,3 +86,15 @@ the wire contract, and stay leak-gate clean.
   public constants after their lane (e.g. gateway/tenant), reference the
   spec's fingerprint prefixes in comments without quotes, and keep the
   literal values only in src/http.ts.
+- Org ids are NOT strict UUIDs: the run-1 dead target carries 33 hex
+  total (a 5-hex group) — naive 32-hex validation rejects a REAL link
+  (found live, not in the notes). Accept ~30–40 hex, preserve the dashed
+  form verbatim, re-dash only exactly-32 undashed input.
+- A webshop-only branch read through the QR host answers config 404 —
+  indistinguishable from tier-2, catalog still readable (RYU pair,
+  97 items). The notes' `Data:null` shape is a webshop-origin answer;
+  classify by answer shape and let the smoke watch for flips.
+- Dead pairs are canaries, menus are live data: the smoke asserts the
+  dead pair STAYS null (a resolve = drift worth an issue) and asserts
+  menu counts as floors, never exact numbers (Crustopia moved 21→17
+  items within a single day).
