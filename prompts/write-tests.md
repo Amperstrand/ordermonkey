@@ -114,6 +114,13 @@ the wire contract, and stay leak-gate clean.
   2024-dated NextAvailableTime and all). Encode isClosedForOrders as
   every-mode-unavailable AND no-future-window; assert the
   closed-with-preorder fixture answers FALSE.
+- Copied invocation guards drift: the `argv[1] vs import.meta.url`
+  compare came from gastronovi's pre-fix CLI and silently no-opped the
+  bin through npm .bin symlinks here too (realpath before compare is
+  the fix; regression-test by spawning the BUILT dist through a
+  symlink, and verify consumer-grade with a tarball install in a clean
+  dir). When a sibling package fixes a shared pattern, grep every
+  package that copied it — jamezz still carries this one.
 - Order-lane safety is a choreography, not a flag: assert the exact
   request sequence from the log (token POST with Origin + form body,
   CreateStock with BranchId/Device-ID/bearer, MakePayment with the
