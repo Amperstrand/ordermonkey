@@ -5,10 +5,15 @@ Selise): plain header-auth JSON menu API — no PoW, no login. Spec in the
 private platform-recon repo (`research/ordermonkey/PLATFORM.md`).
 
 Rules:
-- READ-ONLY: no accounts, no orders, no payments. Phase-3+ surfaces
-  (anonymous JWT, CreateSalesOrder(Draft), hosted-payment redirect) are
-  documented, not implemented. Payment boundary: a hosted checkout a human
-  opens (mcp-cashu-exchange docs/PAYMENT.md).
+- READS are fully read-only: no accounts, no orders, no payments.
+- The staged order lane (`src/staged-order.ts`, library-only — the CLI
+  has NO order command by design) is policy-gated to test surfaces:
+  vendor-demo-branch allowlist enforced before any network traffic,
+  TEST-host assertion on the PSP redirect, abort-at-boundary with the
+  stock hold ALWAYS released. Anonymous guest sessions only (no
+  accounts). CreateSalesOrder / AuthorizePayment / SendOrderToPos stay
+  documented, not implemented. Payment boundary for real orders: a
+  hosted checkout a human opens (mcp-cashu-exchange docs/PAYMENT.md).
 - Phase-3 staging policy (orchestrator, 2026-10-04): test surfaces ONLY —
   the vendor demo branch ("Website Demo" 6447fb68…, no real kitchen, PSP
   redirect goes to Saferpay TEST) and abort-at-boundary orders. NEVER

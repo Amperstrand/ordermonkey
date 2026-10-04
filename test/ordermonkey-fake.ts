@@ -33,7 +33,8 @@
  *    (Data.Data) and mixes "3.50" CHF strings with "98%" percent
  *    strings in one DiscountValue field.
  */
-import { BUNDLE_GATEWAY_KEY, BUNDLE_TENANT_ID } from "../src/http.js";
+import { BUNDLE_GATEWAY_KEY, BUNDLE_PAYMENT_KEY, BUNDLE_TENANT_ID } from "../src/http.js";
+import { STAGED_TEST_BRANCH, STAGED_TEST_ORG } from "../src/staged-order.js";
 import { bodyOf, headerRecord, jsonResponse, type RecordedRequest } from "./transport-fake.js";
 
 export const LIVE_ORG = "aa11bb22-cc33-4d44-8e55-ff6677889900";
@@ -47,6 +48,10 @@ export const WEBSHOP_BRANCH = "d3e4f5061728394a5b6c7d8e9fa0b1c2";
 export const WEBSHOP_SLUG = "synthetic-cantina";
 export const HIDEOUT_ORG = "ee55ff66-0011-4118-8a29-330011223344";
 export const HIDEOUT_BRANCH = "e4f5061728394a5b6c7d8e9fa0b1c2d3";
+export const DEMO_ORG = STAGED_TEST_ORG;
+export const DEMO_BRANCH = STAGED_TEST_BRANCH;
+export const P_DEMO_BURGER = "ddeeff00-1122-4334-8556-66778899a0ab";
+export const P_DEMO_TEA = "eeff0011-2233-4445-8667-778899a0bcde";
 
 export const P_PAD_THAI = "ab12cd34-ef56-4a78-8b90-12cd34ef56ab";
 export const P_SPRING = "bc23de45-fa67-4b89-8c01-23de45fa67bc";
@@ -67,6 +72,8 @@ export interface FakeOrderMonkeyOptions {
   readonly rotateKeys?: boolean;
   /** Keys rotated AND served in the synthetic main.*.js — recovery succeeds. */
   readonly rotatedKeys?: { readonly gatewayKey: string; readonly tenantId: string };
+  /** Host the MakePayment fake redirects to (default: the Saferpay TEST host). */
+  readonly paymentRedirectHost?: string;
 }
 
 const SYNTHETIC_MAIN = "/main.a1b2c3d4e5f60718.js";
@@ -376,12 +383,53 @@ type BranchFixture = {
   readonly menu: unknown[] | undefined;
 };
 
+const demoMenu = [
+  {
+    CategoryId: "4455ff66-0011-4223-8a34-3300112233aa",
+    CategoryName: "Synthetic Demo Card",
+    CategoryDescription: null,
+    CategorySortOrder: 1,
+    IsForQrCodeProduct: false,
+    CategoryProducts: [
+      {
+        ProductId: P_DEMO_BURGER,
+        ProductName: langMap("Synthetic Demo Burger"),
+        Ingredients: null,
+        NormalPrice: 13,
+        DiscountPrice: 13,
+        IsProductAvailable: true,
+        IsProductAvailableForStock: true,
+        IsStockEnabled: true,
+        StockLimitType: "DailyLimit",
+        StockAlertLimit: 2,
+        CurrentStock: 50,
+        ServingVariations: serving([{ type: "Takeaway", enabled: true }]),
+        Taxes: [],
+      },
+      {
+        ProductId: P_DEMO_TEA,
+        ProductName: langMap("Synthetic Demo Tea"),
+        Ingredients: null,
+        NormalPrice: 4.5,
+        DiscountPrice: 4.5,
+        IsProductAvailable: true,
+        IsProductAvailableForStock: true,
+        IsStockEnabled: false,
+        ServingVariations: serving([{ type: "Takeaway", enabled: true }]),
+        Taxes: [],
+      },
+    ],
+    CategoryMedias: [],
+  },
+];
+
 const BRANCHES: readonly BranchFixture[] = [
   { org: LIVE_ORG, branch: LIVE_BRANCH, config: "grayed", orgName: "Synthetic Noodle Bar", menu: liveTakeawayMenu() },
   { org: TIER2_ORG, branch: TIER2_BRANCH, config: "missing", orgName: "Synthetic Alt Kitchen", menu: tier2Menu },
   { org: TIER3_ORG, branch: TIER3_BRANCH, config: "missing", orgName: "", menu: [] },
   { org: WEBSHOP_ORG, branch: WEBSHOP_BRANCH, config: "null", orgName: "Synthetic Webshop Cantina", menu: tier2Menu },
   { org: HIDEOUT_ORG, branch: HIDEOUT_BRANCH, config: "hideout", orgName: "Synthetic Hideout Grill", menu: hideoutMenu },
+  { org: DEMO_ORG, branch: DEMO_BRANCH, config: "approved", orgName: "Synthetic Website Demo", menu: demoMenu },
 ];
 
 function configBody(kind: BranchFixture["config"]): { readonly status: number; readonly body: Record<string, unknown> } {
@@ -420,7 +468,7 @@ function brandBody(fixture: BranchFixture): Record<string, unknown> {
     BranchUUID: defaults ? "" : fixture.branch,
     NameTranslations: defaults ? [] : [{ LanguageCodeType: code, Text: `${fixture.orgName} Branch` }],
     Currency: "CHF",
-    DefaultLanguage: "fr",
+    DefaultLanguage: fixture.config === "approved" ? "de" : "fr",
     LanguageList: [],
     Address: { Country: "CH", City: "Synth City", ZipCode: "0000", StreetNo: "1", HouseNo: "-" },
     VatUUID: "-",
@@ -464,6 +512,10 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
   readonly requests: readonly RecordedRequest[];
 } {
   const requests: RecordedRequest[] = [];
+  const issuedTokens = new Set<string>();
+  const issuedRefreshCookies = new Set<string>();
+  const stockHolds = new Set<string>();
+  let tokenSerial = 0;
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const method = (init?.method ?? "GET").toUpperCase();
@@ -471,9 +523,6 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
     const body = bodyOf(init);
     requests.push({ method, url: `${url.origin}${url.pathname}${url.search === "" ? "" : `?${url.searchParams.toString()}`}`, headers, body });
 
-    if (method !== "GET") {
-      return jsonResponse(envelope(null), {}, 405);
-    }
     if (url.pathname === "/") {
       return new Response(
         `<!doctype html><html><body><app-root></app-root><script src="main.a1b2c3d4e5f60718.js" type="module"></script></body></html>`,
@@ -488,11 +537,110 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
       return new Response(body, { status: 200, headers: { "content-type": "application/javascript" } });
     }
     // The read gate: four load-bearing headers, ApiKey is the hard one.
+    if (url.pathname === "/api/identity/v100/identity/token" && method === "POST") {
+      if (headers["origin"] === undefined) {
+        return jsonResponse({ error: "invalid_request", error_description: "origin required" }, {}, 400);
+      }
+      const form = new URLSearchParams(typeof body === "string" ? body : "");
+      const grant = form.get("grant_type");
+      const cookie = (headers["cookie"] ?? "").match(/httpOnlyRefreshToken=([^;]+)/)?.[1] ?? null;
+      if (grant === "authenticate_site") {
+        tokenSerial += 1;
+        const accessToken = `synthetic-anonymous-token-${tokenSerial}`;
+        const refreshCookie = `synthetic-refresh-cookie-${tokenSerial}`;
+        issuedTokens.add(accessToken);
+        issuedRefreshCookies.add(refreshCookie);
+        return new Response(
+          JSON.stringify({
+            scope: "offline_access",
+            token_type: "Bearer",
+            access_token: accessToken,
+            expires_in: 600,
+            refresh_token: `synthetic-refresh-${tokenSerial}`,
+            ip_address: "203.0.113.10",
+            may_access: "app.ordermonkey.com",
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json;charset=UTF-8",
+              "set-cookie": `httpOnlyRefreshToken=${refreshCookie}; expires=Mon, 02 Nov 2026 07:42:01 GMT; domain=ordermonkey.com; path=/; httponly`,
+            },
+          },
+        );
+      }
+      if (grant === "refresh_token") {
+        if (cookie === null || !issuedRefreshCookies.has(cookie)) {
+          return jsonResponse({ error: "invalid_grant" }, {}, 400);
+        }
+        tokenSerial += 1;
+        const accessToken = `synonymous-refresh-token-${tokenSerial}`;
+        issuedTokens.add(accessToken);
+        return new Response(
+          JSON.stringify({
+            scope: "offline_access",
+            token_type: "Bearer",
+            access_token: accessToken,
+            expires_in: 420,
+            refresh_token: "synthetic-refresh-reissued",
+            ip_address: "203.0.113.10",
+            may_access: "app.ordermonkey.com",
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json;charset=UTF-8",
+              "set-cookie": `httpOnlyRefreshToken=${cookie}; expires=Mon, 02 Nov 2026 07:42:01 GMT; domain=ordermonkey.com; path=/; httponly`,
+            },
+          },
+        );
+      }
+      return jsonResponse({ error: "unsupported_grant_type" }, {}, 400);
+    }
+    if (url.pathname.endsWith("PaymentService/ExternalPaymentCommand/MakePayment") && method === "POST") {
+      if (headers["apikey"] !== BUNDLE_PAYMENT_KEY) return jsonResponse(unauthorized(), {}, 401);
+      if (headers["organizationid"] !== STAGED_TEST_ORG || headers["organizationidentifier"] !== STAGED_TEST_BRANCH) {
+        return jsonResponse(unauthorized(), {}, 401);
+      }
+      const host = options.paymentRedirectHost ?? "test.saferpay.com";
+      return jsonResponse({
+        RedirectUrl: `https://${host}/vt2/api/PaymentPage/258202/17732542/synthetic-token-value`,
+        Token: "synthetic-token-value",
+        Expiration: "2026-10-04T12:00:00.000+00:00",
+        PaymentDetailId: "0beef00d-11aa-4bb2-8cc3-99aabbccddee",
+        StatusCode: 0,
+        ErrorMessage: null,
+        UsesTransactionApi: false,
+      });
+    }
     const expected = options.rotatedKeys ??
       (options.rotateKeys === true
         ? { gatewayKey: "00000000feedface0badc0ffee000000", tenantId: "aaaa1111-bb22-4cc3-8dd4-eeeeffff0000" }
         : { gatewayKey: BUNDLE_GATEWAY_KEY, tenantId: BUNDLE_TENANT_ID });
     const path = url.pathname;
+    if (path.endsWith("/CmsGateway/Command/CreateStock") && method === "POST") {
+      if (headers["organizationid"] !== STAGED_TEST_ORG || headers["branchid"] !== STAGED_TEST_BRANCH) {
+        return jsonResponse(unauthorized(), {}, 401);
+      }
+      if (headers["device-id"] === undefined || !String(headers["authorization"] ?? "").startsWith("Bearer synthetic")) {
+        return jsonResponse(unauthorized(), {}, 401);
+      }
+      const payload = JSON.parse(typeof body === "string" ? body : "{}") as { CartId?: string };
+      if (payload.CartId === undefined) return jsonResponse({ StatusCode: 1 }, {}, 400);
+      stockHolds.add(payload.CartId);
+      return jsonResponse({
+        Errors: { IsValid: true, Errors: [], RuleSetsExecuted: null },
+        ErrorMessages: [],
+        StatusCode: 0,
+        HttpStatusCode: 200,
+      });
+    }
+    const deleteStock = path.match(/\/CmsGateway\/Command\/DeleteStock\/([^/]+)$/);
+    if (deleteStock?.[1] !== undefined && method === "DELETE") {
+      if (headers["branchuuid"] !== STAGED_TEST_BRANCH) return jsonResponse(unauthorized(), {}, 401);
+      if (!stockHolds.delete(deleteStock[1])) return jsonResponse(notFoundEnvelope(), {}, 404);
+      return jsonResponse({ StatusCode: 0, HttpStatusCode: 200 });
+    }
     if (headers["apikey"] !== expected.gatewayKey || headers["tenantid"] !== expected.tenantId) {
       return jsonResponse(unauthorized(), {}, 401);
     }

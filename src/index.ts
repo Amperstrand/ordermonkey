@@ -4,10 +4,12 @@ export { asTransportError, OrderMonkeyError } from "./error.js";
 export type { OrderMonkeyFailureReason } from "./error.js";
 export {
   BUNDLE_GATEWAY_KEY,
+  BUNDLE_PAYMENT_KEY,
   BUNDLE_TENANT_ID,
   fetchJson,
   fetchText,
   ORDERMONKEY_ORIGIN,
+  postFormJson,
   readHeaders,
   SHIPPED_BUNDLE_KEYS,
   USER_AGENT,
@@ -45,6 +47,17 @@ export type {
 } from "./menu.js";
 export { parseWelcomeTarget } from "./resolve.js";
 export type { WelcomeTarget } from "./resolve.js";
+export {
+  assertTestRedirectHost,
+  isStagedTestSurface,
+  stagedOrder,
+  STAGED_TEST_BRANCH,
+  STAGED_TEST_ORG,
+} from "./staged-order.js";
+export type { StagedItem, StagedOrderOptions, StagedOrderResult } from "./staged-order.js";
+export { OrderMonkeyPolicyError } from "./staged-order.js";
+export { anonymousSession, refreshSession } from "./session.js";
+export type { GuestSession } from "./session.js";
 export { isWebshopSlug, orgFromSlugEnvelope, webshopBranches, webshopVenueFromSlug } from "./webshop.js";
 export type {
   RawWebshopAddress,

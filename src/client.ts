@@ -23,6 +23,8 @@ import {
   type UnavailableDisplayMode,
 } from "./menu.js";
 import { branchId as parseBranchId, orgId as parseOrgId, type BranchId, type BranchTier, type MenuType, type OrgId } from "./types.js";
+import { stagedOrder as stagedOrderFlow } from "./staged-order.js";
+import type { StagedItem, StagedOrderOptions, StagedOrderResult } from "./staged-order.js";
 import {
   orgFromSlugEnvelope,
   webshopBranches,
@@ -285,6 +287,20 @@ export class OrderMonkeyClient {
       { branchName: branch.displayName ?? branch.name, defaultLanguage: branch.defaultLanguage },
       "missing",
     );
+  }
+
+  /**
+   * Staged order lane (library-only; the CLI has no order command by
+   * design): anonymous session → CreateStock hold → MakePayment →
+   * TEST-host assertion → hold released. Vendor-demo allowlist enforced
+   * before any network traffic — see staged-order.ts for the rails.
+   */
+  async stagedOrder(
+    branch: Branch,
+    items: readonly StagedItem[],
+    options: StagedOrderOptions = {},
+  ): Promise<StagedOrderResult> {
+    return await stagedOrderFlow(branch, items, options, this.options.fetchImpl ?? fetch);
   }
 
   /**

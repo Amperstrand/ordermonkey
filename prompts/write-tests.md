@@ -108,6 +108,14 @@ the wire contract, and stay leak-gate clean.
   exist" lessons: the QR config lacks MinimumOrderValue, the webshop
   config carries it (0 = none) — a typed-null quirk went stale the
   moment the second lane arrived.
+- Order-lane safety is a choreography, not a flag: assert the exact
+  request sequence from the log (token POST with Origin + form body,
+  CreateStock with BranchId/Device-ID/bearer, MakePayment with the
+  payment key + OrganizationIdentifier, DeleteStock with the BranchUUID
+  header — the platform's THIRD branch-header name), and make each
+  refusal path prove its side effect (venue refusal → zero requests;
+  non-TEST host → policy error AND release happened). The live one-shot
+  against the demo pair is the only network the lane ever needs.
 - Declared-but-unparsed wire fields are drift debt: the detail parser
   originally typed `Taxes` without parsing them — a parallel prototype's
   run-8 deltas (per-serving-variation tax rates, IsCombo with zero

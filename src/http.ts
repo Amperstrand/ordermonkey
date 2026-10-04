@@ -11,6 +11,8 @@ export const USER_AGENT = "ordermonkey/0.1";
  */
 export const BUNDLE_GATEWAY_KEY = "c0d8c6f8045c45c68e7e159de76f4067";
 export const BUNDLE_TENANT_ID = "8F040955-8038-49D7-93E1-6A9C3B4F9EEC";
+/** Payment-service endpoints swap to this key AND rename the branch header to OrganizationIdentifier. */
+export const BUNDLE_PAYMENT_KEY = "99ee6657-6ac2-43f8-a7d4-a929240a50d3";
 
 export interface BundleKeys {
   readonly gatewayKey: string;
@@ -69,6 +71,53 @@ export type FetchJsonResult<T> = JsonResult<T> | JsonFailure;
 export type FetchTextResult =
   | { readonly ok: true; readonly text: string }
   | { readonly ok: false; readonly kind: "network" | "http"; readonly status: number; readonly body: string };
+
+export interface FormJsonResult<T> {
+  readonly ok: true;
+  readonly value: T;
+  readonly cookies: readonly string[];
+}
+
+export type PostFormJsonResult<T> = FormJsonResult<T> | JsonFailure;
+
+/** URL-encoded form POST returning JSON plus any Set-Cookie headers. */
+export async function postFormJson<T>(
+  url: string,
+  form: URLSearchParams,
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PostFormJsonResult<T>> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+      body: form.toString(),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    if (!isTransportFailure(error)) throw error;
+    return {
+      ok: false,
+      kind: "network",
+      status: 0,
+      body: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const cookies = response.headers
+    .getSetCookie()
+    .map((entry) => entry.split(";")[0])
+    .filter((entry): entry is string => entry !== "");
+  const text = await response.text();
+  if (!response.ok) {
+    return { ok: false, kind: "http", status: response.status, body: text.slice(0, 500) };
+  }
+  try {
+    return { ok: true, value: JSON.parse(text) as T, cookies };
+  } catch {
+    return { ok: false, kind: "parse", status: response.status, body: text.slice(0, 500) };
+  }
+}
 
 /** Plain text fetch (app index / JS bundle) with the same transport semantics. */
 export async function fetchText(

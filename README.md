@@ -22,6 +22,23 @@ retrievable artifact). **Never pay-at-counter orders at real venues** —
 a real kitchen would make real food. The demo branch is watched by the
 weekly smoke as the staging target.
 
+## Staged order lane (library-only, policy-gated)
+
+`client.stagedOrder(branch, items)` implements the sanctioned test flow:
+anonymous guest session (`authenticate_site` grant — Origin header
+hard-required, ~600 s tokens, refresh at ~420 s with a non-rotating
+refresh cookie) → `CreateStock` hold (Command headers: four + `Device-ID`
++ bearer) → `MakePayment` (payment headers: the payment lane key +
+`OrganizationIdentifier` branch header) → **TEST-host assertion** on the
+redirect → `DeleteStock` release (`BranchUUID` header — this platform's
+third branch-header name). Three rails make it safe by construction:
+a hard demo-pair allowlist refused **before any network traffic**, a
+TEST-PSP-host allowlist (`test.saferpay.com`) that turns any other
+redirect into a policy error (hold released before rethrowing), and
+abort-at-boundary — `AuthorizePayment`, `CreateSalesOrder`, and
+`SendOrderToPos` are never called. The CLI has no order command by
+design.
+
 Both guest surfaces are covered: the **QR lane**
 (`app.ordermonkey.com/welcome/<orgId>/<branchId>`) and the **webshop
 lane** (`webshop.ordermonkey.com/<slug>` → slug resolves to org → branch
@@ -166,6 +183,15 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   through the QR host — a webshop-only branch 404s there exactly like a
   tier-2 pair; the `webshop` tier remains the defensive classification
   for a genuine Data:null answer.
+
+- **staged order lane, live (2026-10-04)** — `stagedOrder()` on the
+  Website Demo branch (Coca-Cola, CHF 4): anonymous session granted,
+  stock hold created, `MakePayment` answered a
+  **test.saferpay.com** redirect (SIX, PaymentDetailId issued, ~55 min
+  expiration), redirect never opened, hold **released**. Zero real food,
+  zero charge, zero persistent order (the recon's boundary proof:
+  aborted PSP redirects leave no retrievable sales order and never fire
+  `SendOrderToPos`).
 
 ## Repo rules
 
