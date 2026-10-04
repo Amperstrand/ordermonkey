@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Weekly smoke: read-only venue check for every worked example. Plain
- * header-auth GETs only — never logs in, never places orders, never
- * touches voucher or payment surfaces. Exit 1 on drift or transport
- * failure. Item counts are asserted as FLOORS, not exact numbers —
- * venue menus drift live (Crustopia moved 21→17 items within one day).
+ * Weekly smoke: read-only venue checks for every worked example, plus the
+ * POLICY-GATED staged-order canary — the sanctioned abort-at-boundary flow
+ * on the vendor demo branch ONLY (anonymous session → stock hold →
+ * MakePayment → TEST-host assertion → hold released; enforced inside
+ * stagedOrder, never overridden here). No real venue is ever ordered
+ * against; item counts are FLOORS (menus drift live — Crustopia moved
+ * 21→17 items within one day). Exit 1 on drift or transport failure.
  */
 import { OrderMonkeyClient } from "../dist/index.js";
 
@@ -81,7 +83,11 @@ for (const unit of WORKED_EXAMPLES) {
       console.error(`smoke fail ${unit.name} menu: ${menu === null ? "null (surface failed)" : `${items} items (< ${unit.minItems})`}`);
       failed = true;
     } else {
-      console.log(`smoke pass ${unit.name}: ${branch.tier}, ${menu.categories.length} categories / ${items} items, ${branch.currency}`);
+      const availability = await client.availability(branch);
+      const windows = availability === null
+        ? "availability unknown"
+        : `takeaway=${availability.takeaway.available} dineIn=${availability.dineIn.available} preorder=${availability.preorder.available}`;
+      console.log(`smoke pass ${unit.name}: ${branch.tier}, ${menu.categories.length} categories / ${items} items, ${branch.currency} (${windows})`);
     }
   } catch (error) {
     console.error(`smoke fail ${unit.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -127,6 +133,30 @@ try {
   }
 } catch (error) {
   console.error(`smoke fail ${DEAD_PAIR.name}: ${error instanceof Error ? error.message : String(error)}`);
+  failed = true;
+}
+
+// Staged-order canary: the sanctioned test flow on the demo pair only.
+// stagedOrder itself enforces the allowlist + TEST-host + release rails.
+try {
+  const branch = await client.branch("6447fb68-86a5-4448-ba4f-a54c1dfd99eb", "7d818c40a47e4b428d566ab248b822ec");
+  const menu = await client.menu(branch, "Takeaway");
+  const item = menu?.products[0];
+  if (branch === null || menu === null || item === undefined) {
+    console.error("smoke fail staged order lane: demo branch/menu unreadable");
+    failed = true;
+  } else {
+    const staged = await client.stagedOrder(branch, [{ productId: item.productId, quantity: 1, unitPrice: item.normalPrice }]);
+    const host = new URL(staged.payment.redirectUrl).hostname;
+    if (host !== "test.saferpay.com" || staged.released !== true) {
+      console.error(`smoke fail staged order lane: host ${host}, released ${staged.released}`);
+      failed = true;
+    } else {
+      console.log(`smoke pass staged order lane: ${item.name} CHF ${staged.payment.amount} → ${host} redirect, hold released (abort-at-boundary)`);
+    }
+  }
+} catch (error) {
+  console.error(`smoke fail staged order lane: ${error instanceof Error ? error.message : String(error)}`);
   failed = true;
 }
 
