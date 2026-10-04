@@ -32,6 +32,15 @@ const WORKED_EXAMPLES = [
   },
 ];
 
+const WORKED_WEBSHOPS = [
+  {
+    name: "RYU Sushi (webshop lane)",
+    slug: "ryu-sushi",
+    tier: "live",
+    minItems: 50,
+  },
+];
+
 const DEAD_PAIR = {
   name: "run-1 target (tier-3)",
   orgId: "a5910451-76e8-4bb4a-b72f-adfcbe736fb4",
@@ -66,6 +75,34 @@ for (const unit of WORKED_EXAMPLES) {
       failed = true;
     } else {
       console.log(`smoke pass ${unit.name}: ${branch.tier}, ${menu.categories.length} categories / ${items} items, ${branch.currency}`);
+    }
+  } catch (error) {
+    console.error(`smoke fail ${unit.name}: ${error instanceof Error ? error.message : String(error)}`);
+    failed = true;
+  }
+}
+
+for (const unit of WORKED_WEBSHOPS) {
+  try {
+    const venue = await client.webshop(unit.slug);
+    if (venue === null) {
+      console.error(`smoke fail ${unit.name}: webshop() null (slug dead?)`);
+      failed = true;
+      continue;
+    }
+    const branch = await client.webshopBranch(venue);
+    if (branch === null || branch.tier !== unit.tier) {
+      console.error(`smoke fail ${unit.name}: tier ${branch?.tier ?? "null"} (was ${unit.tier})`);
+      failed = true;
+      continue;
+    }
+    const menu = await client.menu(branch, "Takeaway");
+    const items = menu?.categories.reduce((total, category) => total + category.products.length, 0) ?? 0;
+    if (menu === null || items < unit.minItems) {
+      console.error(`smoke fail ${unit.name} menu: ${menu === null ? "null" : `${items} items (< ${unit.minItems})`}`);
+      failed = true;
+    } else {
+      console.log(`smoke pass ${unit.name}: ${branch.tier}, ${menu.categories.length} categories / ${items} items, fee ${branch.transactionFeePercentage}%`);
     }
   } catch (error) {
     console.error(`smoke fail ${unit.name}: ${error instanceof Error ? error.message : String(error)}`);

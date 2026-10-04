@@ -29,12 +29,19 @@ export function readHeaders(
   keys: BundleKeys = SHIPPED_BUNDLE_KEYS,
 ): Record<string, string> {
   return {
+    ...publicHeaders(keys),
+    OrganizationId: org,
+    BranchId: branch,
+  };
+}
+
+/** Identity-free variant: the slug resolver and branch list need only the platform headers. */
+export function publicHeaders(keys: BundleKeys = SHIPPED_BUNDLE_KEYS): Record<string, string> {
+  return {
     "user-agent": USER_AGENT,
     accept: "application/json",
     ApiKey: keys.gatewayKey,
     TenantId: keys.tenantId,
-    OrganizationId: org,
-    BranchId: branch,
   };
 }
 

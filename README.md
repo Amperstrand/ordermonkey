@@ -14,6 +14,12 @@ hosted PSP redirect (SIX / ADYEN-ONLINE …) a human opens. The anonymous
 not implemented. Payment endpoints additionally swap the key
 (PaymentApiKey) and rename the branch header to `OrganizationIdentifier`.
 
+Both guest surfaces are covered: the **QR lane**
+(`app.ordermonkey.com/welcome/<orgId>/<branchId>`) and the **webshop
+lane** (`webshop.ordermonkey.com/<slug>` → slug resolves to org → branch
+rows → `GetWebShopConfiguration`, the webshop's OWN liveness probe —
+which hard-requires BranchId).
+
 ```sh
 npm install github:Amperstrand/ordermonkey
 ```
@@ -35,6 +41,7 @@ CLI (Node 22+):
 ```sh
 npx ordermonkey menu "https://app.ordermonkey.com/welcome/7c28afeb-2ce1-48a6-b5aa-bdb7e8d102c2/cb43001f858e478e9a59479e0f6c577b"
 npx ordermonkey menu <orgId>/<branchId> --type Dinein
+npx ordermonkey menu ryu-sushi --lane webshop
 ```
 
 ## Error semantics
@@ -101,9 +108,19 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   `MinAmountToApplyDiscount`, and the two `DiscountValue` formats ("3.50"
   CHF strings and "98%" percent strings in one field). Codes are never
   listed and `VerifyVoucher` is never called.
-- Deliberate absence: **no min-order-value field exists** on this
-  platform's public config — `branch.minOrderValue` is typed `null` so
-  the gap is visible, not invented.
+- Deliberate absence, lane-scoped: the **QR-lane config has NO
+  min-order-value field** (`branch.minOrderValue` is null there); the
+  **webshop config DOES carry `MinimumOrderValue`** (0 = none published)
+  plus `IsProductHideOnZero` — the quirk is lane-specific, and the type
+  makes the gap visible instead of inventing a value.
+- Webshop lane: slug → org via `GetOrganizationsByShopDetails` (no
+  identity headers), branch rows via `GetAllBranch?IsWebshopRequest=true`
+  (OrganizationId header only) — rows duplicate `BranchName`/`Name` and
+  carry `NameTranslations` (the venue-facing name), ops text can ride in
+  `Address.HouseNo` (passed through verbatim), and the branch row's
+  `PaymentProviderType` ("cloud") differs from the config's
+  `PaymentProviders`. `GetWebShopConfiguration` hard-requires BranchId
+  (org-only → HTTP 400) and answers on BOTH origins.
 
 ## Verification (live, 2026-10-03)
 
@@ -126,6 +143,12 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   shipped constants (prefixes c0d8c6f8 / 8F040955) from the served
   index + `main.<hash>.js`; the rotation rescue is exercised offline
   against a synthetic rotated bundle (56 tests).
+- **RYU Sushi webshop lane** (`--lane webshop ryu-sushi`, 2026-10-04) —
+  slug → org `fd75c12c…` → 1 branch (`cba95fa1…`, main, de), ops-text
+  pickup note in `HouseNo`, classified **live** through
+  `GetWebShopConfiguration` (SetupStatus Approved, ADYEN-ONLINE-WEBSHOP,
+  2% fee, MinimumOrderValue 0 — the field the QR config lacks); full
+  catalog through the shared menu read: 13 categories / 97 items.
 - **dead pair a5910451** (run-1 target, 33-hex org id) — `branch()`
   returns null: the tier-3 everything-defaults signature, live-confirmed.
 - **RYU Sushi webshop pair via the QR host** (`fd75c12c…/cba95fa1…`) —

@@ -45,6 +45,15 @@ export type {
 } from "./menu.js";
 export { parseWelcomeTarget } from "./resolve.js";
 export type { WelcomeTarget } from "./resolve.js";
+export { isWebshopSlug, webshopVenueFromSlug } from "./webshop.js";
+export type {
+  RawWebshopAddress,
+  RawWebshopBranch,
+  RawWebshopOrganization,
+  WebshopAddress,
+  WebshopBranchInfo,
+  WebshopVenue,
+} from "./webshop.js";
 export { branchId, menuType, orgId } from "./types.js";
 export type { BranchId, BranchTier, MenuType, OrgId } from "./types.js";
 export const PLATFORM = "ordermonkey";

@@ -3,7 +3,7 @@ import { recoverBundleConstants } from "./bundle.js";
 import {
   fetchJson,
   ORDERMONKEY_ORIGIN,
-  readHeaders,
+  USER_AGENT,
   SHIPPED_BUNDLE_KEYS,
   type BundleKeys,
   type FetchJsonResult,
@@ -23,6 +23,13 @@ import {
   type UnavailableDisplayMode,
 } from "./menu.js";
 import { branchId as parseBranchId, orgId as parseOrgId, type BranchId, type BranchTier, type MenuType, type OrgId } from "./types.js";
+import {
+  webshopVenueFromSlug,
+  type RawWebshopBranch,
+  type RawWebshopOrganization,
+  type WebshopBranchInfo,
+  type WebshopVenue,
+} from "./webshop.js";
 
 const GATEWAY = "/api/business-fnb-gateway";
 const QUERY = `${GATEWAY}/CmsGateway/Query`;
@@ -36,6 +43,22 @@ interface RawMobileAppConfiguration {
   readonly TableNumbers?: readonly number[] | null;
   readonly IsTableNumberMandatory?: boolean;
   readonly UnavailableProductDisplayMode?: string | null;
+}
+
+/**
+ * Webshop config shares the mobile-config fields and ADDS
+ * MinimumOrderValue (absent from the QR-app config entirely) — the
+ * min-order quirk is lane-scoped. Hard-requires BranchId (400 without).
+ */
+interface RawWebshopConfiguration {
+  readonly SetupStatus?: string | null;
+  readonly PaymentProviders?: readonly string[] | null;
+  readonly TransactionFeePercentage?: number | null;
+  readonly TableNumbers?: readonly number[] | null;
+  readonly IsTableNumberMandatory?: boolean;
+  readonly UnavailableProductDisplayMode?: string | null;
+  readonly MinimumOrderValue?: number | null;
+  readonly IsProductHideOnZero?: boolean;
 }
 
 interface RawOrganizationDetails {
@@ -72,11 +95,10 @@ export interface Branch {
   readonly isTableNumberMandatory: boolean;
   readonly tableNumbers: readonly number[];
   /**
-   * Deliberately typed null: NO min-order-value field exists in this
-   * platform's public config (spec) — only the per-voucher
-   * MinAmountToApplyDiscount exists (see Discount).
+   * QR-lane configs carry NO min-order field (always null here). Webshop
+   * configs DO carry MinimumOrderValue — 0 means none published.
    */
-  readonly minOrderValue: null;
+  readonly minOrderValue: number | null;
 }
 
 function network(context: string, body: string): OrderMonkeyError {
@@ -118,10 +140,21 @@ export class OrderMonkeyClient {
     return (this.options.now ?? (() => new Date()))();
   }
 
-  private async get<T>(path: string, org: OrgId, branch: BranchId): Promise<FetchJsonResult<T>> {
+  private async get<T>(
+    path: string,
+    org: OrgId | null,
+    branch: BranchId | null,
+  ): Promise<FetchJsonResult<T>> {
     const url = `${ORDERMONKEY_ORIGIN}${path}`;
     const init = (keys: BundleKeys): RequestInit => ({
-      headers: readHeaders(org, branch, keys),
+      headers: {
+        "user-agent": USER_AGENT,
+        accept: "application/json",
+        ApiKey: keys.gatewayKey,
+        TenantId: keys.tenantId,
+        ...(org === null ? {} : { OrganizationId: org }),
+        ...(branch === null ? {} : { BranchId: branch }),
+      },
       signal: AbortSignal.timeout(20_000),
     });
     let result = await fetchJson<T>(url, init(this.bundleKeys), this.options.fetchImpl);
@@ -199,6 +232,92 @@ export class OrderMonkeyClient {
       isTableNumberMandatory: configData?.IsTableNumberMandatory === true,
       tableNumbers: [...(configData?.TableNumbers ?? [])],
       minOrderValue: null,
+    };
+  }
+
+  /**
+   * Resolves a webshop lane (`webshop.ordermonkey.com/<slug>`): slug →
+   * organization id (GetOrganizationsByShopDetails, no identity headers)
+   * → branch rows (GetAllBranch?IsWebshopRequest=true — OrganizationId
+   * header only). Returns null for an unknown slug; an empty branch
+   * list is data, not absence.
+   */
+  async webshop(slug: string): Promise<WebshopVenue | null> {
+    const orgResult = await this.get<RawEnvelope<RawWebshopOrganization>>(
+      `${QUERY}/GetOrganizationsByShopDetails?UniqueUrlIdentifier=${encodeURIComponent(slug)}`,
+      null,
+      null,
+    );
+    if (!orgResult.ok && orgResult.kind === "network") throw network("webshop slug resolve failed", orgResult.body);
+    if (!orgResult.ok) return null;
+    let org: OrgId;
+    let rows: RawEnvelope<readonly RawWebshopBranch[]>;
+    try {
+      const venue = webshopVenueFromSlug(slug, orgResult.value, { Data: [] });
+      if (venue === null) return null;
+      org = venue.orgId;
+    } catch {
+      return null;
+    }
+    const branchResult = await this.get<RawEnvelope<readonly RawWebshopBranch[]>>(
+      `${QUERY}/GetAllBranch?IsWebshopRequest=true`,
+      org,
+      null,
+    );
+    if (!branchResult.ok && branchResult.kind === "network") throw network("webshop branches read failed", branchResult.body);
+    if (!branchResult.ok) return { slug, orgId: org, branches: [] };
+    rows = branchResult.value;
+    const venue = webshopVenueFromSlug(slug, orgResult.value, rows);
+    return venue === null ? { slug, orgId: org, branches: [] } : venue;
+  }
+
+  /**
+   * Classifies a webshop branch through ITS OWN config
+   * (GetWebShopConfiguration — hard-requires BranchId, a 400 without it)
+   * plus org/brand reads, yielding a Branch the shared menu()/product()/
+   * discounts() surface accepts. Defaults to the venue's first branch.
+   */
+  async webshopBranch(
+    venue: WebshopVenue,
+    branch: WebshopBranchInfo | undefined = venue.branches[0],
+  ): Promise<Branch | null> {
+    if (branch === undefined) return null;
+    const config = await this.get<RawEnvelope<RawWebshopConfiguration>>(`${QUERY}/GetWebShopConfiguration`, venue.orgId, branch.branchId);
+    if (!config.ok && config.kind === "network") throw network("webshop config read failed", config.body);
+    if (!config.ok) {
+      if (config.kind === "parse") throw new Error(`webshop config read failed: unparsable body (${config.body.slice(0, 80)})`);
+      if (config.status !== 404) {
+        throw new Error(`webshop config read failed: HTTP ${config.status}`);
+      }
+    }
+    const configMissing =
+      !config.ok || (config.ok && (config.value.IsSuccess === false || config.value.Data === undefined || config.value.Data === null));
+
+    const orgResult = await this.get<RawEnvelope<RawOrganizationDetails>>(`${QUERY}/GetOrganizationDetails`, venue.orgId, branch.branchId);
+    if (!orgResult.ok && orgResult.kind === "network") throw network("organization read failed", orgResult.body);
+    const venueName = orgResult.ok ? orgResult.value.Data?.Name ?? null : null;
+    if (configMissing && (venueName === null || venueName === "")) return null;
+
+    const brand = await this.get<RawEnvelope<RawBrandInformation>>(`${QUERY}/GetBrandInformation`, venue.orgId, branch.branchId);
+    if (!brand.ok && brand.kind === "network") throw network("brand read failed", brand.body);
+    const brandData = brand.ok ? brand.value.Data : undefined;
+    const configData = config.ok && !configMissing ? config.value.Data : undefined;
+
+    return {
+      orgId: venue.orgId,
+      branchId: branch.branchId,
+      tier: configMissing ? "surface-dead" : "live",
+      setupStatus: configData?.SetupStatus ?? null,
+      name: venueName !== null && venueName !== "" ? venueName : null,
+      branchName: branch.displayName ?? branch.name,
+      currency: brandData?.Currency ?? "CHF",
+      defaultLanguage: branch.defaultLanguage ?? brandData?.DefaultLanguage ?? null,
+      paymentProviders: [...(configData?.PaymentProviders ?? [])],
+      transactionFeePercentage: configData?.TransactionFeePercentage ?? null,
+      unavailableProductDisplayMode: unavailableDisplayMode(configData?.UnavailableProductDisplayMode),
+      isTableNumberMandatory: configData?.IsTableNumberMandatory === true,
+      tableNumbers: [...(configData?.TableNumbers ?? [])],
+      minOrderValue: configData?.MinimumOrderValue ?? null,
     };
   }
 

@@ -44,6 +44,7 @@ export const TIER3_ORG = "cc33dd44-ee55-4f66-8a07-118899001122";
 export const TIER3_BRANCH = "c2d3e4f5061728394a5b6c7d8e9fa0b1";
 export const WEBSHOP_ORG = "dd44ee55-ff66-4007-8a18-229900112233";
 export const WEBSHOP_BRANCH = "d3e4f5061728394a5b6c7d8e9fa0b1c2";
+export const WEBSHOP_SLUG = "synthetic-cantina";
 export const HIDEOUT_ORG = "ee55ff66-0011-4118-8a29-330011223344";
 export const HIDEOUT_BRANCH = "e4f5061728394a5b6c7d8e9fa0b1c2d3";
 
@@ -427,6 +428,37 @@ function brandBody(fixture: BranchFixture): Record<string, unknown> {
   });
 }
 
+const webshopBranchRow = {
+  BranchName: "Synthetic Cantina - Default Branch",
+  Name: "Synthetic Cantina - Default Branch",
+  NameTranslations: [{ LanguageCodeType: "en", Text: "Synthetic Cantina (inside Synthetic Waffles)" }],
+  BranchUUID: WEBSHOP_BRANCH,
+  OrganizationId: WEBSHOP_ORG,
+  Address: {
+    Country: "Switzerland",
+    City: "Synth City",
+    ZipCode: "0000",
+    StreetNo: "Synthetic Center",
+    HouseNo: "BITTE BESTELLUNG AN DER SYNTHET-THEKE ABHOLEN!",
+  },
+  PaymentProviderType: "cloud",
+  IsMainBranch: true,
+  DefaultLanguage: "de",
+};
+
+const webshopConfig = {
+  SetupStatus: "Approved",
+  PaymentProviders: ["ADYEN-ONLINE-WEBSHOP"],
+  TransactionFeePercentage: 2,
+  MinimumOrderValue: 0,
+  MinimumOrderType: "",
+  UnavailableProductDisplayMode: "GrayedOut",
+  IsProductHideOnZero: false,
+  TableNumbers: [],
+  TableIds: [],
+  IsTableNumberMandatory: false,
+};
+
 export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
   readonly fetchImpl: typeof fetch;
   readonly requests: readonly RecordedRequest[];
@@ -460,8 +492,33 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
       (options.rotateKeys === true
         ? { gatewayKey: "00000000feedface0badc0ffee000000", tenantId: "aaaa1111-bb22-4cc3-8dd4-eeeeffff0000" }
         : { gatewayKey: BUNDLE_GATEWAY_KEY, tenantId: BUNDLE_TENANT_ID });
+    const path = url.pathname;
     if (headers["apikey"] !== expected.gatewayKey || headers["tenantid"] !== expected.tenantId) {
       return jsonResponse(unauthorized(), {}, 401);
+    }
+    if (path.endsWith("/CmsGateway/Query/GetOrganizationsByShopDetails")) {
+      const slug = url.searchParams.get("UniqueUrlIdentifier");
+      if (slug === WEBSHOP_SLUG) return jsonResponse(envelope({ OrganizationId: WEBSHOP_ORG }));
+      return jsonResponse(notFoundEnvelope(), {}, 404);
+    }
+    if (path.endsWith("/CmsGateway/Query/GetAllBranch")) {
+      if (url.searchParams.get("IsWebshopRequest") !== "true") return jsonResponse(notFoundEnvelope(), {}, 404);
+      if (headers["organizationid"] === WEBSHOP_ORG) return jsonResponse(envelope([webshopBranchRow]));
+      return jsonResponse(envelope([]));
+    }
+    if (path.endsWith("/CmsGateway/Query/GetWebShopConfiguration")) {
+      // Delta 23 (live-verified): org-only reads 400 — BranchId is required.
+      if (headers["branchid"] === undefined) {
+        return jsonResponse(
+          { ...notFoundEnvelope(), StatusCode: 400, ErrorMessage: "Attribute Validation Error" },
+          {},
+          400,
+        );
+      }
+      if (headers["organizationid"] === WEBSHOP_ORG && headers["branchid"] === WEBSHOP_BRANCH) {
+        return jsonResponse(envelope(webshopConfig));
+      }
+      return jsonResponse(notFoundEnvelope(), {}, 404);
     }
     const fixture = BRANCHES.find((candidate) => candidate.branch === headers["branchid"]);
     if (fixture === undefined || headers["organizationid"] !== fixture.org) {
@@ -474,8 +531,6 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
       const missing = configBody("missing");
       return jsonResponse(missing.body, {}, missing.status);
     }
-
-    const path = url.pathname;
     if (path.endsWith("/CmsGateway/Query/GetMobileAppConfiguration")) {
       const config = configBody(fixture.config);
       return jsonResponse(config.body, {}, config.status);

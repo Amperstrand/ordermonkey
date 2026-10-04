@@ -99,6 +99,29 @@ describe("runCli", () => {
     expect(netErrors[0]).toContain("fetch failed");
   });
 
+  it("reads a webshop venue by slug: branches, ops-text note, tier via webshop config", async () => {
+    const transport = fakeOrderMonkey();
+    const lines: string[] = [];
+    const code = await runCli(["menu", "synthetic-cantina", "--lane", "webshop"], { ...ports(lines, []), fetchImpl: transport.fetchImpl });
+    expect(code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain("webshop synthetic-cantina");
+    expect(text).toContain("Synthetic Cantina (inside Synthetic Waffles) (main)");
+    expect(text).toContain("pickup note (HouseNo): BITTE BESTELLUNG AN DER SYNTHET-THEKE ABHOLEN!");
+    expect(text).toContain("live (SetupStatus Approved)");
+    expect(text).toContain("2%");
+  });
+
+  it("rejects a bad lane value and a non-slug webshop target", async () => {
+    const laneErrors: string[] = [];
+    expect(await runCli(["menu", WELCOME, "--lane", "kiosk"], ports([], laneErrors))).toBe(1);
+    expect(laneErrors[0]).toContain("--lane must be qr or webshop");
+
+    const slugErrors: string[] = [];
+    expect(await runCli(["menu", "not a slug!", "--lane", "webshop"], ports([], slugErrors))).toBe(1);
+    expect(slugErrors[0]).toContain("not a webshop slug");
+  });
+
   it("prints usage on help and on no arguments", async () => {
     const lines: string[] = [];
     expect(await runCli([], ports(lines, []))).toBe(0);

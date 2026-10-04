@@ -2,6 +2,7 @@
 import { pathToFileURL } from "node:url";
 import { OrderMonkeyClient, type Branch } from "./client.js";
 import { parseWelcomeTarget } from "./resolve.js";
+import { isWebshopSlug } from "./webshop.js";
 import type { Menu } from "./menu.js";
 
 /**
@@ -18,8 +19,12 @@ export interface CliPorts {
 const USAGE = `ordermonkey — read-only OrderMonkey (Selise) QR-webapp client
 
 commands:
-  menu <welcome-url-or-ids> [--type t]   read the branch + menu card set
-                                        --type Takeaway (default) | Dinein
+  menu <welcome-url-or-ids> [--type t] [--lane l]   read the branch + menu card set
+                                                   --type Takeaway (default) | Dinein
+                                                   --lane qr (default) | webshop
+  webshop lane: <target> is a webshop slug (e.g. ryu-sushi); the venue is
+  resolved via GetOrganizationsByShopDetails and classified through
+  GetWebShopConfiguration (its OWN liveness probe).
 
 <welcome-url-or-ids> is an app.ordermonkey.com/welcome/<orgId>/<branchId>
 URL (optionally ?table_no=<n>) or a bare <orgId>/<branchId> pair. Reads
@@ -60,7 +65,15 @@ function printBranch(branch: Branch, out: (line: string) => void): void {
     `  psps:       ${branch.paymentProviders.length === 0 ? "none published" : branch.paymentProviders.join(", ")}`
       + (branch.transactionFeePercentage === null ? "" : ` (fee ${branch.transactionFeePercentage}%)`),
   );
-  out(`  min order:  ${branch.minOrderValue === null ? "none published — no such field on this platform" : "…"}`);
+  out(
+    `  min order:  ${
+      branch.minOrderValue === null
+        ? "none published (no field on the QR-lane config)"
+        : branch.minOrderValue === 0
+          ? "none (webshop config: 0)"
+          : String(branch.minOrderValue)
+    }`,
+  );
 }
 
 function printMenu(menu: Menu, out: (line: string) => void): void {
@@ -87,12 +100,14 @@ interface ParsedArgs {
   readonly command: string | undefined;
   readonly target: string | undefined;
   readonly type: "Takeaway" | "Dinein";
+  readonly lane: "qr" | "webshop";
 }
 
 function parseArgs(argv: readonly string[]): ParsedArgs | null {
   let command: string | undefined;
   let target: string | undefined;
   let type: "Takeaway" | "Dinein" = "Takeaway";
+  let lane: "qr" | "webshop" = "qr";
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === undefined) break;
@@ -103,11 +118,18 @@ function parseArgs(argv: readonly string[]): ParsedArgs | null {
       i += 1;
       continue;
     }
+    if (arg === "--lane") {
+      const value = argv[i + 1];
+      if (value !== "qr" && value !== "webshop") return null;
+      lane = value;
+      i += 1;
+      continue;
+    }
     if (command === undefined) command = arg;
     else if (target === undefined) target = arg;
     else return null;
   }
-  return { command, target, type };
+  return { command, target, type, lane };
 }
 
 export async function runCli(
@@ -116,11 +138,11 @@ export async function runCli(
 ): Promise<0 | 1> {
   const args = parseArgs(argv);
   if (args === null) {
-    ports.err("--type must be Takeaway or Dinein");
+    ports.err("--type must be Takeaway or Dinein; --lane must be qr or webshop");
     ports.err(USAGE);
     return 1;
   }
-  const { command, target, type } = args;
+  const { command, target, type, lane } = args;
   if (command === undefined || command === "help" || command === "-h" || command === "--help") {
     ports.out(USAGE);
     return 0;
@@ -134,23 +156,48 @@ export async function runCli(
     ports.err("menu needs a welcome URL or <orgId>/<branchId> pair");
     return 1;
   }
-  const parsed = parseWelcomeTarget(target);
-  if (parsed === null) {
-    ports.err(`cannot parse welcome URL or id pair: ${target}`);
-    return 1;
-  }
-  if (parsed.tableNo !== null) {
-    ports.out(`table ${parsed.tableNo} (dine-in bound to this table)`);
-  }
-
   const client = new OrderMonkeyClient(ports.fetchImpl === undefined ? {} : { fetchImpl: ports.fetchImpl });
   try {
-    const branch = await client.branch(parsed.orgId, parsed.branchId);
-    if (branch === null) {
-      ports.err(
-        `no branch for ${target} (tier-3 dead pair: every endpoint answers defaults — indistinguishable from random UUIDs)`,
-      );
-      return 1;
+    let branch: Branch | null;
+    if (lane === "webshop") {
+      if (!isWebshopSlug(target)) {
+        ports.err(`not a webshop slug: ${target}`);
+        return 1;
+      }
+      const venue = await client.webshop(target);
+      if (venue === null) {
+        ports.err(`no webshop venue for slug ${target}`);
+        return 1;
+      }
+      ports.out(`webshop ${venue.slug} — org ${venue.orgId} — ${venue.branches.length} branch(es)`);
+      for (const row of venue.branches) {
+        ports.out(`  branch ${row.branchId}  ${row.displayName ?? row.name ?? "?"}${row.isMainBranch ? " (main)" : ""}`);
+        const note = row.address?.houseNo;
+        if (note !== null && note !== undefined) {
+          ports.out(`    pickup note (HouseNo): ${note}`);
+        }
+      }
+      branch = await client.webshopBranch(venue);
+      if (branch === null) {
+        ports.err(`webshop venue ${target} has no classifiable branch`);
+        return 1;
+      }
+    } else {
+      const parsed = parseWelcomeTarget(target);
+      if (parsed === null) {
+        ports.err(`cannot parse welcome URL or id pair: ${target}`);
+        return 1;
+      }
+      if (parsed.tableNo !== null) {
+        ports.out(`table ${parsed.tableNo} (dine-in bound to this table)`);
+      }
+      branch = await client.branch(parsed.orgId, parsed.branchId);
+      if (branch === null) {
+        ports.err(
+          `no branch for ${target} (tier-3 dead pair: every endpoint answers defaults — indistinguishable from random UUIDs)`,
+        );
+        return 1;
+      }
     }
     printBranch(branch, ports.out);
     const menu = await client.menu(branch, type);

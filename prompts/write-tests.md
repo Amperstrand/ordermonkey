@@ -98,6 +98,16 @@ the wire contract, and stay leak-gate clean.
   dead pair STAYS null (a resolve = drift worth an issue) and asserts
   menu counts as floors, never exact numbers (Crustopia moved 21→17
   items within a single day).
+- Webshop lanes are a SECOND identity system, not a URL variant: slug →
+  org needs NO identity headers, branch rows need org ONLY, and the
+  webshop's own config hard-requires BranchId (org-only → 400 — encode
+  the 400 in the fake and assert the client never sends that shape).
+  Classify webshop venues through THEIR config, never the QR probe: the
+  same pair reads surface-dead via the QR host and live via the webshop
+  lane — assert BOTH readings. And lane-scope your "field does not
+  exist" lessons: the QR config lacks MinimumOrderValue, the webshop
+  config carries it (0 = none) — a typed-null quirk went stale the
+  moment the second lane arrived.
 - Declared-but-unparsed wire fields are drift debt: the detail parser
   originally typed `Taxes` without parsing them — a parallel prototype's
   run-8 deltas (per-serving-variation tax rates, IsCombo with zero
