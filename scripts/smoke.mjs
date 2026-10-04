@@ -30,6 +30,13 @@ const WORKED_EXAMPLES = [
     tier: "surface-dead",
     minItems: 50,
   },
+  {
+    name: "Website Demo (phase-3 staging target — vendor demo, no real kitchen)",
+    orgId: "6447fb68-86a5-4448-ba4f-a54c1dfd99eb",
+    branchId: "7d818c40a47e4b428d566ab248b822ec",
+    tier: "live",
+    minItems: 10,
+  },
 ];
 
 const WORKED_WEBSHOPS = [

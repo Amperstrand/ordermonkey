@@ -14,6 +14,14 @@ hosted PSP redirect (SIX / ADYEN-ONLINE …) a human opens. The anonymous
 not implemented. Payment endpoints additionally swap the key
 (PaymentApiKey) and rename the branch header to `OrganizationIdentifier`.
 
+Phase-3 staging policy (orchestrator, 2026-10-04): when order placement
+is ever built, it runs against **test surfaces only** — the vendor demo
+branch ("Website Demo" `6447fb68…`, no real kitchen, PSP redirect to
+Saferpay TEST) and abort-at-boundary orders (proven to leave no
+retrievable artifact). **Never pay-at-counter orders at real venues** —
+a real kitchen would make real food. The demo branch is watched by the
+weekly smoke as the staging target.
+
 Both guest surfaces are covered: the **QR lane**
 (`app.ordermonkey.com/welcome/<orgId>/<branchId>`) and the **webshop
 lane** (`webshop.ordermonkey.com/<slug>` → slug resolves to org → branch

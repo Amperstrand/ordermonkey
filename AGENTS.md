@@ -9,6 +9,11 @@ Rules:
   (anonymous JWT, CreateSalesOrder(Draft), hosted-payment redirect) are
   documented, not implemented. Payment boundary: a hosted checkout a human
   opens (mcp-cashu-exchange docs/PAYMENT.md).
+- Phase-3 staging policy (orchestrator, 2026-10-04): test surfaces ONLY —
+  the vendor demo branch ("Website Demo" 6447fb68…, no real kitchen, PSP
+  redirect goes to Saferpay TEST) and abort-at-boundary orders. NEVER
+  pay-at-counter/cash orders at real venues: a real kitchen would make
+  real food.
 - Public repo: never commit card numbers, HAR/pcap/logs, cookies, captured
   payloads, personal data, or venue keys from public bundles. Fakes are
   synthetic. Commit via `sh scripts/git-commit.sh`; CI runs the leak scan.
