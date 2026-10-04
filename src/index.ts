@@ -45,7 +45,7 @@ export type {
 } from "./menu.js";
 export { parseWelcomeTarget } from "./resolve.js";
 export type { WelcomeTarget } from "./resolve.js";
-export { isWebshopSlug, webshopVenueFromSlug } from "./webshop.js";
+export { isWebshopSlug, orgFromSlugEnvelope, webshopBranches, webshopVenueFromSlug } from "./webshop.js";
 export type {
   RawWebshopAddress,
   RawWebshopBranch,

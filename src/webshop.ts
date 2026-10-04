@@ -64,54 +64,60 @@ export interface WebshopVenue {
   readonly branches: readonly WebshopBranchInfo[];
 }
 
+export function orgFromSlugEnvelope(payload: RawEnvelope<RawWebshopOrganization>): OrgId | null {
+  const organizationId = payload.Data?.OrganizationId;
+  if (payload.IsSuccess === false || organizationId === undefined || organizationId === null || organizationId === "") {
+    return null;
+  }
+  try {
+    return parseOrgId(organizationId);
+  } catch {
+    return null;
+  }
+}
+
+export function webshopBranches(payload: RawEnvelope<readonly RawWebshopBranch[]>): readonly WebshopBranchInfo[] {
+  const rows = payload.Data ?? [];
+  return rows.flatMap((row) => {
+    const uuid = row.BranchUUID;
+    if (uuid === undefined || uuid === null || uuid === "") return [];
+    let id: BranchId;
+    try {
+      id = parseBranchId(uuid);
+    } catch {
+      return [];
+    }
+    const address = row.Address;
+    return [
+      {
+        branchId: id,
+        name: row.BranchName ?? row.Name ?? null,
+        displayName: translationsText(row.NameTranslations),
+        address: address === null || address === undefined
+          ? null
+          : {
+              country: address.Country ?? null,
+              city: address.City ?? null,
+              zipCode: address.ZipCode ?? null,
+              streetNo: address.StreetNo ?? null,
+              houseNo: address.HouseNo ?? null,
+            },
+        paymentProviderType: row.PaymentProviderType ?? null,
+        isMainBranch: row.IsMainBranch === true,
+        defaultLanguage: row.DefaultLanguage ?? null,
+      },
+    ];
+  });
+}
+
+/** Composes the granular parsers; kept for API compatibility. */
 export function webshopVenueFromSlug(
   slug: string,
   org: RawEnvelope<RawWebshopOrganization>,
   branches: RawEnvelope<readonly RawWebshopBranch[]>,
 ): WebshopVenue | null {
-  const organizationId = org.Data?.OrganizationId;
-  if (org.IsSuccess === false || organizationId === undefined || organizationId === null || organizationId === "") {
-    return null;
-  }
-  const venue: WebshopVenue = {
-    slug,
-    orgId: parseOrgId(organizationId),
-    branches: [],
-  };
-  const rows = branches.Data ?? [];
-  return {
-    ...venue,
-    branches: rows.flatMap((row) => {
-      const uuid = row.BranchUUID;
-      if (uuid === undefined || uuid === null || uuid === "") return [];
-      let id: BranchId;
-      try {
-        id = parseBranchId(uuid);
-      } catch {
-        return [];
-      }
-      const address = row.Address;
-      return [
-        {
-          branchId: id,
-          name: row.BranchName ?? row.Name ?? null,
-          displayName: translationsText(row.NameTranslations),
-          address: address === null || address === undefined
-            ? null
-            : {
-                country: address.Country ?? null,
-                city: address.City ?? null,
-                zipCode: address.ZipCode ?? null,
-                streetNo: address.StreetNo ?? null,
-                houseNo: address.HouseNo ?? null,
-              },
-          paymentProviderType: row.PaymentProviderType ?? null,
-          isMainBranch: row.IsMainBranch === true,
-          defaultLanguage: row.DefaultLanguage ?? null,
-        },
-      ];
-    }),
-  };
+  const orgId = orgFromSlugEnvelope(org);
+  return orgId === null ? null : { slug, orgId, branches: webshopBranches(branches) };
 }
 
 export function isWebshopSlug(value: string): boolean {

@@ -24,7 +24,8 @@ import {
 } from "./menu.js";
 import { branchId as parseBranchId, orgId as parseOrgId, type BranchId, type BranchTier, type MenuType, type OrgId } from "./types.js";
 import {
-  webshopVenueFromSlug,
+  orgFromSlugEnvelope,
+  webshopBranches,
   type RawWebshopBranch,
   type RawWebshopOrganization,
   type WebshopBranchInfo,
@@ -36,28 +37,16 @@ const QUERY = `${GATEWAY}/CmsGateway/Query`;
 /** The product detail route deliberately sits OUTSIDE CmsGateway/Query. */
 const PRODUCT_DETAILS = `${GATEWAY}/GetProductDetailsByIdV2`;
 
-interface RawMobileAppConfiguration {
+interface RawBranchConfiguration {
   readonly SetupStatus?: string | null;
   readonly PaymentProviders?: readonly string[] | null;
   readonly TransactionFeePercentage?: number | null;
   readonly TableNumbers?: readonly number[] | null;
   readonly IsTableNumberMandatory?: boolean;
   readonly UnavailableProductDisplayMode?: string | null;
-}
-
-/**
- * Webshop config shares the mobile-config fields and ADDS
- * MinimumOrderValue (absent from the QR-app config entirely) — the
- * min-order quirk is lane-scoped. Hard-requires BranchId (400 without).
- */
-interface RawWebshopConfiguration {
-  readonly SetupStatus?: string | null;
-  readonly PaymentProviders?: readonly string[] | null;
-  readonly TransactionFeePercentage?: number | null;
-  readonly TableNumbers?: readonly number[] | null;
-  readonly IsTableNumberMandatory?: boolean;
-  readonly UnavailableProductDisplayMode?: string | null;
+  /** Webshop-config-only keys (absent from the QR-app config). */
   readonly MinimumOrderValue?: number | null;
+  readonly MinimumOrderType?: string | null;
   readonly IsProductHideOnZero?: boolean;
 }
 
@@ -174,65 +163,79 @@ export class OrderMonkeyClient {
   }
 
   /**
-   * Reads identity + liveness for an (orgId, branchId) pair:
-   * GetMobileAppConfiguration (QR liveness), GetOrganizationDetails
-   * (venue name), GetBrandInformation (currency, languages, branch
-   * name). Returns null for a tier-3 dead pair — config not-found AND
-   * an empty organization name is the indistinguishable-from-random-
-   * UUIDs signature. A config 404 with a real org name is tier-2
-   * ("surface-dead"): the mobile-app surface was removed but catalog
-   * rows persist — config-404 alone does NOT prove deletion.
+   * Shared liveness classification behind both lanes: config answer →
+   * tier decision → org read (venue name decides tier-3 null) → brand
+   * read. `nullDataTier` fixes the ONE semantic difference between the
+   * lanes: a config answering `Data:null` means "webshop-shaped branch"
+   * on the QR probe but "missing" on the webshop probe.
    */
-  async branch(orgIdInput: string | OrgId, branchIdInput: string | BranchId): Promise<Branch | null> {
-    const org = parseOrgId(orgIdInput);
-    const branch = parseBranchId(branchIdInput);
-
-    const config = await this.get<RawEnvelope<RawMobileAppConfiguration>>(`${QUERY}/GetMobileAppConfiguration`, org, branch);
+  private async classifyBranch(
+    config: FetchJsonResult<RawEnvelope<RawBranchConfiguration>>,
+    org: OrgId,
+    branch: BranchId,
+    identity: { readonly branchName: string | null; readonly defaultLanguage: string | null },
+    nullDataTier: "webshop" | "missing",
+  ): Promise<Branch | null> {
     if (!config.ok) {
       if (config.kind === "network") throw network("config read failed", config.body);
       if (config.kind === "parse") throw new Error(`config read failed: unparsable body (${config.body.slice(0, 80)})`);
       if (config.status !== 404) {
-        // Non-404 HTTP failures here usually mean the public bundle
-        // constants rotated (spec-listed risk) — surface, never swallow.
+        // Non-404 HTTP failures usually mean the public bundle constants
+        // rotated (spec-listed risk) — surface, never swallow.
         throw new Error(`config read failed: HTTP ${config.status} (bundle constants rotated?)`);
       }
     }
-
-    // Three config answer shapes: not-found (HTTP 404 or a 200 envelope
-    // with StatusCode 404 / IsSuccess false — "No data found"), Data null
-    // (webshop lane), or a real QR-app configuration.
-    const webshopShaped = config.ok && config.value.Data === null && config.value.IsSuccess !== false;
-    const surfaceMissing =
-      !webshopShaped && (!config.ok || (config.ok && (config.value.IsSuccess === false || config.value.Data === undefined)));
+    // Three config answer shapes: not-found (HTTP 404, or a 200 envelope
+    // with StatusCode 404 / IsSuccess false — "No data found"), Data
+    // null, or a real configuration.
+    const nullShaped = config.ok && config.value.Data === null && config.value.IsSuccess !== false;
+    const notFound = !nullShaped && (!config.ok || (config.ok && (config.value.IsSuccess === false || config.value.Data === undefined)));
+    const missing = notFound || (nullDataTier === "missing" && nullShaped);
 
     const orgResult = await this.get<RawEnvelope<RawOrganizationDetails>>(`${QUERY}/GetOrganizationDetails`, org, branch);
     if (!orgResult.ok && orgResult.kind === "network") throw network("organization read failed", orgResult.body);
     const venueName = orgResult.ok ? orgResult.value.Data?.Name ?? null : null;
-
-    if (surfaceMissing && (venueName === null || venueName === "")) return null;
+    if (missing && (venueName === null || venueName === "")) return null;
 
     const brand = await this.get<RawEnvelope<RawBrandInformation>>(`${QUERY}/GetBrandInformation`, org, branch);
     if (!brand.ok && brand.kind === "network") throw network("brand read failed", brand.body);
     const brandData = brand.ok ? brand.value.Data : undefined;
     const configData = config.ok ? config.value.Data : undefined;
-    const tier: BranchTier = surfaceMissing ? "surface-dead" : webshopShaped ? "webshop" : "live";
 
     return {
       orgId: org,
       branchId: branch,
-      tier,
+      tier: missing ? "surface-dead" : nullShaped ? "webshop" : "live",
       setupStatus: configData?.SetupStatus ?? null,
       name: venueName !== null && venueName !== "" ? venueName : null,
-      branchName: translationsText(brandData?.NameTranslations),
+      branchName: identity.branchName ?? translationsText(brandData?.NameTranslations),
       currency: brandData?.Currency ?? "CHF",
-      defaultLanguage: brandData?.DefaultLanguage ?? null,
+      defaultLanguage: identity.defaultLanguage ?? brandData?.DefaultLanguage ?? null,
       paymentProviders: [...(configData?.PaymentProviders ?? [])],
       transactionFeePercentage: configData?.TransactionFeePercentage ?? null,
       unavailableProductDisplayMode: unavailableDisplayMode(configData?.UnavailableProductDisplayMode),
       isTableNumberMandatory: configData?.IsTableNumberMandatory === true,
       tableNumbers: [...(configData?.TableNumbers ?? [])],
-      minOrderValue: null,
+      minOrderValue: configData?.MinimumOrderValue ?? null,
     };
+  }
+
+  /**
+   * Reads identity + liveness for an (orgId, branchId) pair via the
+   * QR-app probe: GetMobileAppConfiguration (liveness),
+   * GetOrganizationDetails (venue name), GetBrandInformation (currency,
+   * languages, branch name). Returns null for a tier-3 dead pair —
+   * config not-found AND an empty organization name is the
+   * indistinguishable-from-random-UUIDs signature. A config 404 with a
+   * real org name is tier-2 ("surface-dead"): the mobile-app surface
+   * was removed but catalog rows persist — config-404 alone does NOT
+   * prove deletion.
+   */
+  async branch(orgIdInput: string | OrgId, branchIdInput: string | BranchId): Promise<Branch | null> {
+    const org = parseOrgId(orgIdInput);
+    const branch = parseBranchId(branchIdInput);
+    const config = await this.get<RawEnvelope<RawBranchConfiguration>>(`${QUERY}/GetMobileAppConfiguration`, org, branch);
+    return await this.classifyBranch(config, org, branch, { branchName: null, defaultLanguage: null }, "webshop");
   }
 
   /**
@@ -250,15 +253,8 @@ export class OrderMonkeyClient {
     );
     if (!orgResult.ok && orgResult.kind === "network") throw network("webshop slug resolve failed", orgResult.body);
     if (!orgResult.ok) return null;
-    let org: OrgId;
-    let rows: RawEnvelope<readonly RawWebshopBranch[]>;
-    try {
-      const venue = webshopVenueFromSlug(slug, orgResult.value, { Data: [] });
-      if (venue === null) return null;
-      org = venue.orgId;
-    } catch {
-      return null;
-    }
+    const org = orgFromSlugEnvelope(orgResult.value);
+    if (org === null) return null;
     const branchResult = await this.get<RawEnvelope<readonly RawWebshopBranch[]>>(
       `${QUERY}/GetAllBranch?IsWebshopRequest=true`,
       org,
@@ -266,59 +262,29 @@ export class OrderMonkeyClient {
     );
     if (!branchResult.ok && branchResult.kind === "network") throw network("webshop branches read failed", branchResult.body);
     if (!branchResult.ok) return { slug, orgId: org, branches: [] };
-    rows = branchResult.value;
-    const venue = webshopVenueFromSlug(slug, orgResult.value, rows);
-    return venue === null ? { slug, orgId: org, branches: [] } : venue;
+    return { slug, orgId: org, branches: webshopBranches(branchResult.value) };
   }
 
   /**
    * Classifies a webshop branch through ITS OWN config
    * (GetWebShopConfiguration — hard-requires BranchId, a 400 without it)
-   * plus org/brand reads, yielding a Branch the shared menu()/product()/
-   * discounts() surface accepts. Defaults to the venue's first branch.
+   * via the shared classifier, yielding a Branch the shared menu()/
+   * product()/discounts() surface accepts. Defaults to the venue's
+   * first branch.
    */
   async webshopBranch(
     venue: WebshopVenue,
     branch: WebshopBranchInfo | undefined = venue.branches[0],
   ): Promise<Branch | null> {
     if (branch === undefined) return null;
-    const config = await this.get<RawEnvelope<RawWebshopConfiguration>>(`${QUERY}/GetWebShopConfiguration`, venue.orgId, branch.branchId);
-    if (!config.ok && config.kind === "network") throw network("webshop config read failed", config.body);
-    if (!config.ok) {
-      if (config.kind === "parse") throw new Error(`webshop config read failed: unparsable body (${config.body.slice(0, 80)})`);
-      if (config.status !== 404) {
-        throw new Error(`webshop config read failed: HTTP ${config.status}`);
-      }
-    }
-    const configMissing =
-      !config.ok || (config.ok && (config.value.IsSuccess === false || config.value.Data === undefined || config.value.Data === null));
-
-    const orgResult = await this.get<RawEnvelope<RawOrganizationDetails>>(`${QUERY}/GetOrganizationDetails`, venue.orgId, branch.branchId);
-    if (!orgResult.ok && orgResult.kind === "network") throw network("organization read failed", orgResult.body);
-    const venueName = orgResult.ok ? orgResult.value.Data?.Name ?? null : null;
-    if (configMissing && (venueName === null || venueName === "")) return null;
-
-    const brand = await this.get<RawEnvelope<RawBrandInformation>>(`${QUERY}/GetBrandInformation`, venue.orgId, branch.branchId);
-    if (!brand.ok && brand.kind === "network") throw network("brand read failed", brand.body);
-    const brandData = brand.ok ? brand.value.Data : undefined;
-    const configData = config.ok && !configMissing ? config.value.Data : undefined;
-
-    return {
-      orgId: venue.orgId,
-      branchId: branch.branchId,
-      tier: configMissing ? "surface-dead" : "live",
-      setupStatus: configData?.SetupStatus ?? null,
-      name: venueName !== null && venueName !== "" ? venueName : null,
-      branchName: branch.displayName ?? branch.name,
-      currency: brandData?.Currency ?? "CHF",
-      defaultLanguage: branch.defaultLanguage ?? brandData?.DefaultLanguage ?? null,
-      paymentProviders: [...(configData?.PaymentProviders ?? [])],
-      transactionFeePercentage: configData?.TransactionFeePercentage ?? null,
-      unavailableProductDisplayMode: unavailableDisplayMode(configData?.UnavailableProductDisplayMode),
-      isTableNumberMandatory: configData?.IsTableNumberMandatory === true,
-      tableNumbers: [...(configData?.TableNumbers ?? [])],
-      minOrderValue: configData?.MinimumOrderValue ?? null,
-    };
+    const config = await this.get<RawEnvelope<RawBranchConfiguration>>(`${QUERY}/GetWebShopConfiguration`, venue.orgId, branch.branchId);
+    return await this.classifyBranch(
+      config,
+      venue.orgId,
+      branch.branchId,
+      { branchName: branch.displayName ?? branch.name, defaultLanguage: branch.defaultLanguage },
+      "missing",
+    );
   }
 
   /**
