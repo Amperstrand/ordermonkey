@@ -245,6 +245,12 @@ const padThaiDetail = {
   Description: langMap("Synthetic noodles, synthetic tamarind"),
   NormalPrice: 12.5,
   DiscountPrice: 12.5,
+  IsCombo: true,
+  ComboItems: [],
+  Taxes: [
+    { Rate: 2.9, TaxType: "Takeaway", Name: "Take-Away", ThirdPartyRefId: "aa99bb88cc774d558e66ff7766889900", IsActive: true },
+    { Rate: 2.6, TaxType: "Dinein", Name: "Dine-in", ThirdPartyRefId: "aa99bb88cc774d558e66ff7766889900", IsActive: true },
+  ],
   ModifierGroups: [
     {
       Name: langMap("Synthetic Spice Level"),
@@ -252,11 +258,12 @@ const padThaiDetail = {
       ThirdPartyRefId: "bb88cc99dd004e668f7700118899001122334455",
       MinModifierSelection: 0,
       MaxModifierSelection: 2,
+      PricingMethod: "IndividualCharge",
       IsSizeModifier: false,
       ProductModifiers: [
-        { Name: langMap("Mild"), Price: 0, IsDefault: true, SortOrder: 0 },
-        { Name: langMap("Hot"), Price: 0.5, IsDefault: false, SortOrder: 1 },
-        { Name: langMap("Volcanic"), Price: 1, IsDefault: false, SortOrder: 2 },
+        { Name: langMap("Mild"), Price: 0, IsDefault: true, IsActive: true, SortOrder: 0 },
+        { Name: langMap("Hot"), Price: 0.5, IsDefault: false, IsActive: true, SortOrder: 1 },
+        { Name: langMap("Volcanic"), Price: 1, IsDefault: false, IsActive: false, SortOrder: 2 },
       ],
     },
     {
@@ -265,17 +272,17 @@ const padThaiDetail = {
       ThirdPartyRefId: null,
       MinModifierSelection: 1,
       MaxModifierSelection: 1,
+      PricingMethod: "IndividualCharge",
       IsSizeModifier: true,
       ProductModifiers: [
-        { Name: langMap("Small"), Price: 0, IsDefault: true, SortOrder: 0 },
-        { Name: langMap("Large"), Price: 1.5, IsDefault: false, SortOrder: 1 },
+        { Name: langMap("Small"), Price: 0, IsDefault: true, IsActive: true, SortOrder: 0 },
+        { Name: langMap("Large"), Price: 1.5, IsDefault: false, IsActive: true, SortOrder: 1 },
       ],
     },
   ],
   UpsellProductIds: [P_RICE, P_TEA],
   CategoryIds: [CAT_NOODLES, CAT_SIDES],
   ThirdPartyRefId: null,
-  Taxes: [],
 };
 
 const liveDiscounts = {
@@ -404,10 +411,13 @@ function configBody(kind: BranchFixture["config"]): { readonly status: number; r
 
 function brandBody(fixture: BranchFixture): Record<string, unknown> {
   const defaults = fixture.config === "defaults" || fixture.orgName === "";
+  // The LIVE branch keys its translations by a full language name — the
+  // alias-normalization wire shape.
+  const code = fixture.config === "grayed" ? "ENGLISH" : "en";
   return envelope({
     OrganizationId: defaults ? "" : fixture.org,
     BranchUUID: defaults ? "" : fixture.branch,
-    NameTranslations: defaults ? [] : [{ LanguageCodeType: "en", Text: `${fixture.orgName} Branch` }],
+    NameTranslations: defaults ? [] : [{ LanguageCodeType: code, Text: `${fixture.orgName} Branch` }],
     Currency: "CHF",
     DefaultLanguage: "fr",
     LanguageList: [],

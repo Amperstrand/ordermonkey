@@ -80,7 +80,10 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
 - Modifier reads need the per-product detail call
   (`GetProductDetailsByIdV2/<id>` — a route that sits directly under
   `business-fnb-gateway`, not under `CmsGateway/Query`); categories carry
-  no modifiers.
+  no modifiers. Detail payloads carry **per-serving-variation taxes**
+  (one Margherita serves takeaway 2.6% vs dine-in 8.1%), `IsCombo` —
+  which does NOT imply `ComboItems` content —, per-modifier `IsActive`
+  and group `PricingMethod`; all carried, nothing inferred.
 - Product dedupe by ProductId across categories; heterogeneous id shapes
   (dashed GUIDs, 64-hex concat, POS `ThirdPartyRefId`, blob-path ids in
   media URLs — three-plus id spaces, all opaque strings).

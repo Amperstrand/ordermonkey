@@ -16,16 +16,26 @@ export type NameTranslations = readonly {
 
 const FALLBACK_ORDER = ["en", "de", "fr", "it"] as const;
 
-function pickFromMap(map: Record<string, unknown>): string | null {
+/** Some venues key NameTranslations by full language names ("ENGLISH"). */
+const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+  english: "en",
+  german: "de",
+  french: "fr",
+  italian: "it",
+};
+
+function normalizeLanguage(key: string): string {
+  const lowered = key.trim().toLowerCase();
+  return LANGUAGE_ALIASES[lowered] ?? lowered;
+}
+
+function pickFromMap(map: Map<string, string>): string | null {
   for (const lang of FALLBACK_ORDER) {
-    const value = map[lang];
-    if (typeof value === "string" && value !== "") return value;
+    const value = map.get(lang);
+    if (value !== undefined) return value;
   }
-  // Last resort: any non-empty language value.
-  for (const value of Object.values(map)) {
-    if (typeof value === "string" && value !== "") return value;
-  }
-  return null;
+  const first = map.values().next();
+  return first.done ? null : first.value;
 }
 
 /**
@@ -44,7 +54,11 @@ export function localizedText(raw: string | null | undefined): string | null {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return raw === "" ? null : raw;
   }
-  return pickFromMap(parsed as Record<string, unknown>);
+  const map = new Map<string, string>();
+  for (const [language, value] of Object.entries(parsed)) {
+    if (typeof value === "string" && value !== "") map.set(normalizeLanguage(language), value);
+  }
+  return pickFromMap(map);
 }
 
 /** Resolves the third localization shape: NameTranslations[] arrays. */
@@ -53,12 +67,8 @@ export function translationsText(list: NameTranslations | null | undefined): str
   const byLanguage = new Map<string, string>();
   for (const entry of list) {
     if (entry.LanguageCodeType === undefined || typeof entry.Text !== "string" || entry.Text === "") continue;
-    if (!byLanguage.has(entry.LanguageCodeType)) byLanguage.set(entry.LanguageCodeType, entry.Text);
+    const key = normalizeLanguage(entry.LanguageCodeType);
+    if (!byLanguage.has(key)) byLanguage.set(key, entry.Text);
   }
-  for (const lang of FALLBACK_ORDER) {
-    const value = byLanguage.get(lang);
-    if (value !== undefined) return value;
-  }
-  const first = byLanguage.values().next();
-  return first.done ? null : first.value;
+  return pickFromMap(byLanguage);
 }

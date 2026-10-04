@@ -98,6 +98,13 @@ the wire contract, and stay leak-gate clean.
   dead pair STAYS null (a resolve = drift worth an issue) and asserts
   menu counts as floors, never exact numbers (Crustopia moved 21→17
   items within a single day).
+- Declared-but-unparsed wire fields are drift debt: the detail parser
+  originally typed `Taxes` without parsing them — a parallel prototype's
+  run-8 deltas (per-serving-variation tax rates, IsCombo with zero
+  ComboItems, modifier IsActive, PricingMethod) forced the sync. When a
+  second source encodes a field you only typed, sync parser + fixture +
+  test in one pass; live data (takeaway 2.6% vs dine-in 8.1% on ONE
+  product) is the assertion that matters.
 - Key rotation is a READ failure, so recovery belongs in the transport
   layer: on 401 fetch the app index → main.<hash>.js, require exactly
   ONE distinct literal per constant (ambiguity throws — never guess),

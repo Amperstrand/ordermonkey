@@ -78,6 +78,7 @@ export interface RawModifier {
   readonly Description?: string | null;
   readonly Price?: number | null;
   readonly IsDefault?: boolean;
+  readonly IsActive?: boolean;
   readonly SortOrder?: number | null;
 }
 
@@ -87,6 +88,7 @@ export interface RawModifierGroup {
   readonly ThirdPartyRefId?: string | null;
   readonly MinModifierSelection?: number | null;
   readonly MaxModifierSelection?: number | null;
+  readonly PricingMethod?: string | null;
   readonly ProductModifiers?: readonly RawModifier[] | null;
   readonly IsSizeModifier?: boolean;
 }
@@ -100,6 +102,8 @@ export interface RawProductDetail {
   readonly UpsellProductIds?: readonly string[] | null;
   readonly CategoryIds?: readonly string[] | null;
   readonly ThirdPartyRefId?: string | null;
+  readonly IsCombo?: boolean;
+  readonly ComboItems?: readonly unknown[] | null;
   readonly Taxes?: readonly RawTax[] | null;
 }
 
@@ -180,6 +184,8 @@ export interface Modifier {
   readonly name: string;
   readonly price: number;
   readonly isDefault: boolean;
+  /** Wire marks inactive modifiers explicitly; carried, never filtered. */
+  readonly isActive: boolean;
   readonly sortOrder: number;
 }
 
@@ -189,6 +195,7 @@ export interface ModifierGroup {
   readonly thirdPartyRefId: string | null;
   readonly minSelection: number;
   readonly maxSelection: number;
+  readonly pricingMethod: string | null;
   readonly modifiers: readonly Modifier[];
   readonly isSizeModifier: boolean;
 }
@@ -203,6 +210,11 @@ export interface ProductDetails {
   readonly upsellProductIds: readonly string[];
   readonly categoryIds: readonly string[];
   readonly thirdPartyRefId: string | null;
+  /** IsCombo true does NOT imply combo content — ComboItems can be []. */
+  readonly isCombo: boolean;
+  readonly comboItemCount: number;
+  /** Per serving variation — takeaway and dine-in rates differ in one payload. */
+  readonly taxes: readonly TaxInfo[];
 }
 
 export type DiscountValue =
@@ -337,10 +349,12 @@ export function productDetailsFromPayload(productId: string, payload: RawEnvelop
       thirdPartyRefId: group.ThirdPartyRefId ?? null,
       minSelection: group.MinModifierSelection ?? 0,
       maxSelection: group.MaxModifierSelection ?? 0,
+      pricingMethod: group.PricingMethod ?? null,
       modifiers: (group.ProductModifiers ?? []).map((modifier) => ({
         name: localizedText(modifier.Name) ?? "",
         price: modifier.Price ?? 0,
         isDefault: modifier.IsDefault === true,
+        isActive: modifier.IsActive !== false,
         sortOrder: modifier.SortOrder ?? 0,
       })),
       isSizeModifier: group.IsSizeModifier === true,
@@ -348,6 +362,9 @@ export function productDetailsFromPayload(productId: string, payload: RawEnvelop
     upsellProductIds: [...(data?.UpsellProductIds ?? [])],
     categoryIds: [...(data?.CategoryIds ?? [])],
     thirdPartyRefId: data?.ThirdPartyRefId ?? null,
+    isCombo: data?.IsCombo === true,
+    comboItemCount: data?.ComboItems?.length ?? 0,
+    taxes: (data?.Taxes ?? []).map(taxOf),
   };
 }
 

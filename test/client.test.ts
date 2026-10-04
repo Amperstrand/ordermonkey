@@ -163,10 +163,38 @@ describe("product", () => {
     expect(details?.categoryIds.length).toBe(2);
     expect(details?.thirdPartyRefId).toBeNull();
     const spice = details?.modifierGroups[0];
-    expect(spice).toMatchObject({ name: "Synthetic Spice Level", minSelection: 0, maxSelection: 2 });
-    expect(spice?.modifiers.map((modifier) => `${modifier.name}:${modifier.price}:${modifier.isDefault ? "def" : ""}`))
-      .toEqual(["Mild:0:def", "Hot:0.5:", "Volcanic:1:"]);
+    expect(spice).toMatchObject({ name: "Synthetic Spice Level", minSelection: 0, maxSelection: 2, pricingMethod: "IndividualCharge" });
+    const flags = (on: boolean, yes: string, no: string): string => (on ? yes : no);
+    expect(
+      spice?.modifiers.map((modifier) => [
+        modifier.name,
+        modifier.price,
+        flags(modifier.isDefault, "def", ""),
+        flags(modifier.isActive, "on", "off"),
+      ].join(":")),
+    ).toEqual(["Mild:0:def:on", "Hot:0.5::on", "Volcanic:1::off"]);
     expect(details?.modifierGroups[1]?.isSizeModifier).toBe(true);
+  });
+
+  it("encodes the run-8 wire deltas: per-variation taxes, IsCombo without content", async () => {
+    const transport = fakeOrderMonkey();
+    const c = client(transport.fetchImpl);
+    const branch = await c.branch(LIVE_ORG, LIVE_BRANCH);
+    const details = await c.product(branch!, P_PAD_THAI);
+    // Taxes differ per serving variation inside ONE payload (2.9 vs 2.6).
+    expect(details?.taxes.map((tax) => [tax.type, tax.rate])).toEqual([["Takeaway", 2.9], ["Dinein", 2.6]]);
+    // IsCombo true does NOT imply combo content — ComboItems can be [].
+    expect(details?.isCombo).toBe(true);
+    expect(details?.comboItemCount).toBe(0);
+    // Inactive modifiers are carried, not filtered.
+    const volcanic = details?.modifierGroups[0]?.modifiers[2];
+    expect(volcanic).toMatchObject({ name: "Volcanic", isActive: false });
+  });
+
+  it("normalizes full-language-name translation keys (ENGLISH → en)", async () => {
+    const transport = fakeOrderMonkey();
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    expect(branch?.branchName).toBe("Synthetic Noodle Bar Branch");
   });
 
   it("returns null for an unknown product id", async () => {
