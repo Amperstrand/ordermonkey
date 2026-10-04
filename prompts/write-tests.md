@@ -98,3 +98,12 @@ the wire contract, and stay leak-gate clean.
   dead pair STAYS null (a resolve = drift worth an issue) and asserts
   menu counts as floors, never exact numbers (Crustopia moved 21→17
   items within a single day).
+- Key rotation is a READ failure, so recovery belongs in the transport
+  layer: on 401 fetch the app index → main.<hash>.js, require exactly
+  ONE distinct literal per constant (ambiguity throws — never guess),
+  retry the refused read once, and cache both the keys and the
+  recovery-attempt flag so a hard rotation costs one bundle fetch, not
+  one per call. The fake needs three bundle flavors: current constants,
+  rotated-with-literals (rescue succeeds), rotated-sans-literals
+  (rescue fails loudly). Verify the extractor LIVE by re-deriving the
+  shipped constants from the real app.

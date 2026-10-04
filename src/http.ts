@@ -12,13 +12,27 @@ export const USER_AGENT = "ordermonkey/0.1";
 export const BUNDLE_GATEWAY_KEY = "c0d8c6f8045c45c68e7e159de76f4067";
 export const BUNDLE_TENANT_ID = "8F040955-8038-49D7-93E1-6A9C3B4F9EEC";
 
+export interface BundleKeys {
+  readonly gatewayKey: string;
+  readonly tenantId: string;
+}
+
+export const SHIPPED_BUNDLE_KEYS: BundleKeys = {
+  gatewayKey: BUNDLE_GATEWAY_KEY,
+  tenantId: BUNDLE_TENANT_ID,
+};
+
 /** Every CmsGateway read is a GET with the same four load-bearing headers. */
-export function readHeaders(org: OrgId, branch: BranchId): Record<string, string> {
+export function readHeaders(
+  org: OrgId,
+  branch: BranchId,
+  keys: BundleKeys = SHIPPED_BUNDLE_KEYS,
+): Record<string, string> {
   return {
     "user-agent": USER_AGENT,
     accept: "application/json",
-    ApiKey: BUNDLE_GATEWAY_KEY,
-    TenantId: BUNDLE_TENANT_ID,
+    ApiKey: keys.gatewayKey,
+    TenantId: keys.tenantId,
     OrganizationId: org,
     BranchId: branch,
   };
@@ -44,6 +58,35 @@ export interface JsonFailure {
 }
 
 export type FetchJsonResult<T> = JsonResult<T> | JsonFailure;
+
+export type FetchTextResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly kind: "network" | "http"; readonly status: number; readonly body: string };
+
+/** Plain text fetch (app index / JS bundle) with the same transport semantics. */
+export async function fetchText(
+  url: string,
+  init: RequestInit,
+  fetchImpl: typeof fetch = fetch,
+): Promise<FetchTextResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, init);
+  } catch (error) {
+    if (!isTransportFailure(error)) throw error;
+    return {
+      ok: false,
+      kind: "network",
+      status: 0,
+      body: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    return { ok: false, kind: "http", status: response.status, body: text.slice(0, 500) };
+  }
+  return { ok: true, text };
+}
 
 export async function fetchJson<T>(
   url: string,

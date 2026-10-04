@@ -65,8 +65,11 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
 
 - The four load-bearing read headers (ApiKey, TenantId, OrganizationId,
   BranchId) with the public bundle constants — platform keys shipped in
-  every page load, recoverable from `main.*.js` on rotation; a non-404
-  config failure is surfaced loudly as the rotation signal.
+  every page load; on a 401 the client re-derives them once from the
+  app bundle (index → `main.<hash>.js`, `recoverBundleConstants`) and
+  retries the refused read — ambiguous or missing literals throw
+  instead of guessing, and a 401 that survives recovery surfaces as an
+  error (one bundle fetch per client, never a loop).
 - The response envelope (`{Data, IsSuccess, StatusCode, ErrorMessage, …}`)
   and its not-found form (HTTP 404 `No data found`).
 - Three localization shapes: JSON-stringified 4-language maps (parse
@@ -115,6 +118,11 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   4 modifiers, max 3; Extras, 18 modifiers, max 5) + 3 upsell ids.
   GetAllDiscounts live: empty for this venue ([] — the surface answers,
   no public vouchers).
+- **bundle-key recovery (extractor live check)** —
+  `recoverBundleConstants()` against the live app re-derived exactly the
+  shipped constants (prefixes c0d8c6f8 / 8F040955) from the served
+  index + `main.<hash>.js`; the rotation rescue is exercised offline
+  against a synthetic rotated bundle (56 tests).
 - **dead pair a5910451** (run-1 target, 33-hex org id) — `branch()`
   returns null: the tier-3 everything-defaults signature, live-confirmed.
 - **RYU Sushi webshop pair via the QR host** (`fd75c12c…/cba95fa1…`) —

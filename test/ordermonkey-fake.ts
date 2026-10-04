@@ -62,9 +62,13 @@ const CAT_TIER2 = "3333333c-4444-4555-8666-77777777777c";
 export interface FakeOrderMonkeyOptions {
   /** Serve menu reads for this branch as a failed envelope (IsSuccess false). */
   readonly menuFailsOn?: string;
-  /** Expect different bundle constants — reads answer 401 (key rotation). */
+  /** Keys rotated with NO literals in the bundle — recovery must fail loudly. */
   readonly rotateKeys?: boolean;
+  /** Keys rotated AND served in the synthetic main.*.js — recovery succeeds. */
+  readonly rotatedKeys?: { readonly gatewayKey: string; readonly tenantId: string };
 }
+
+const SYNTHETIC_MAIN = "/main.a1b2c3d4e5f60718.js";
 
 function envelope(data: unknown): Record<string, unknown> {
   return {
@@ -428,9 +432,25 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
     if (method !== "GET") {
       return jsonResponse(envelope(null), {}, 405);
     }
+    if (url.pathname === "/") {
+      return new Response(
+        `<!doctype html><html><body><app-root></app-root><script src="main.a1b2c3d4e5f60718.js" type="module"></script></body></html>`,
+        { status: 200, headers: { "content-type": "text/html" } },
+      );
+    }
+    if (url.pathname === SYNTHETIC_MAIN) {
+      const keys = options.rotatedKeys ?? { gatewayKey: BUNDLE_GATEWAY_KEY, tenantId: BUNDLE_TENANT_ID };
+      const body = options.rotateKeys === true
+        ? "var config={themeName:'synthetic',paymentApiKey:'not-the-lane-you-want'};"
+        : `var config={apiKey:"${keys.gatewayKey}",tenantId:"${keys.tenantId}",paymentApiKey:'nope'};`;
+      return new Response(body, { status: 200, headers: { "content-type": "application/javascript" } });
+    }
     // The read gate: four load-bearing headers, ApiKey is the hard one.
-    const expectedKey = options.rotateKeys === true ? "00000000feedface0badc0ffee000000" : BUNDLE_GATEWAY_KEY;
-    if (headers["apikey"] !== expectedKey || headers["tenantid"] !== BUNDLE_TENANT_ID) {
+    const expected = options.rotatedKeys ??
+      (options.rotateKeys === true
+        ? { gatewayKey: "00000000feedface0badc0ffee000000", tenantId: "aaaa1111-bb22-4cc3-8dd4-eeeeffff0000" }
+        : { gatewayKey: BUNDLE_GATEWAY_KEY, tenantId: BUNDLE_TENANT_ID });
+    if (headers["apikey"] !== expected.gatewayKey || headers["tenantid"] !== expected.tenantId) {
       return jsonResponse(unauthorized(), {}, 401);
     }
     const fixture = BRANCHES.find((candidate) => candidate.branch === headers["branchid"]);

@@ -13,7 +13,7 @@ import {
   WEBSHOP_BRANCH,
   WEBSHOP_ORG,
 } from "./ordermonkey-fake.js";
-import { sent } from "./transport-fake.js";
+import { jsonResponse, sent } from "./transport-fake.js";
 
 function client(fetchImpl: typeof fetch): OrderMonkeyClient {
   return new OrderMonkeyClient({ fetchImpl });
@@ -114,9 +114,9 @@ describe("branch", () => {
     });
   });
 
-  it("surfaces non-404 config failures loudly (bundle key rotation path)", async () => {
+  it("surfaces a rotation the bundle cannot resolve loudly instead of guessing", async () => {
     const transport = fakeOrderMonkey({ rotateKeys: true });
-    await expect(client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH)).rejects.toThrow(/rotated/);
+    await expect(client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH)).rejects.toThrow(/bundle recovery/);
   });
 
   it("the read gate is real: a headerless fetch is 401-unauthorized", async () => {
@@ -210,6 +210,54 @@ describe("discounts", () => {
     const c = client(transport.fetchImpl);
     const branch = await c.branch(WEBSHOP_ORG, WEBSHOP_BRANCH);
     expect(await c.discounts(branch!)).toEqual([]);
+  });
+});
+
+const ROTATED_KEYS = {
+  gatewayKey: "feedface00112233445566778899a0b1",
+  tenantId: "cafebeef-0011-4223-8445-66778899a0ab",
+};
+
+describe("bundle key rotation", () => {
+  it("recovers rotated constants from the app bundle and retries the refused read", async () => {
+    const transport = fakeOrderMonkey({ rotatedKeys: ROTATED_KEYS });
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    expect(branch).toMatchObject({ tier: "live", name: "Synthetic Noodle Bar" });
+    const configReads = transport.requests.filter((request) => request.url.includes("GetMobileAppConfiguration"));
+    expect(configReads).toHaveLength(2);
+    expect(configReads[0]?.headers["apikey"]).toBe(BUNDLE_GATEWAY_KEY);
+    expect(configReads[1]?.headers["apikey"]).toBe(ROTATED_KEYS.gatewayKey);
+    expect(configReads[1]?.headers["tenantid"]).toBe(ROTATED_KEYS.tenantId);
+    expect(transport.requests.some((request) => request.url === "https://app.ordermonkey.com/")).toBe(true);
+    expect(transport.requests.some((request) => request.url.includes("main.a1b2c3d4e5f60718.js"))).toBe(true);
+  });
+
+  it("caches recovered keys across reads — one bundle fetch per client", async () => {
+    const transport = fakeOrderMonkey({ rotatedKeys: ROTATED_KEYS });
+    const c = client(transport.fetchImpl);
+    const branch = await c.branch(LIVE_ORG, LIVE_BRANCH);
+    const menu = await c.menu(branch!, "Takeaway");
+    expect(menu?.categories.length).toBeGreaterThan(0);
+    expect(transport.requests.filter((request) => request.url.includes("main."))).toHaveLength(1);
+    const apiReads = transport.requests.filter((request) => request.url.includes("/api/"));
+    for (const request of apiReads.slice(1)) {
+      expect(request.headers["apikey"]).toBe(ROTATED_KEYS.gatewayKey);
+    }
+  });
+
+  it("a 401 that survives recovery surfaces once, then refuses to re-fetch the bundle", async () => {
+    const bundleServing = fakeOrderMonkey({ rotatedKeys: ROTATED_KEYS });
+    const always401: typeof fetch = async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.startsWith("/api/")) {
+        return jsonResponse({ Data: null, IsSuccess: false, StatusCode: 401, ErrorMessage: "Unauthorized" }, {}, 401);
+      }
+      return await bundleServing.fetchImpl(input, init);
+    };
+    const c = client(always401);
+    await expect(c.branch(LIVE_ORG, LIVE_BRANCH)).rejects.toThrow(/rotated/);
+    await expect(c.branch(LIVE_ORG, LIVE_BRANCH)).rejects.toThrow(/rotated again/);
+    expect(bundleServing.requests.filter((request) => request.url.includes("main."))).toHaveLength(1);
   });
 });
 

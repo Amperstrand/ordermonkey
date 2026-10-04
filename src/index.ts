@@ -1,15 +1,18 @@
 export { OrderMonkeyClient, type Branch, type ClientOptions } from "./client.js";
+export { recoverBundleConstants } from "./bundle.js";
 export { asTransportError, OrderMonkeyError } from "./error.js";
 export type { OrderMonkeyFailureReason } from "./error.js";
 export {
   BUNDLE_GATEWAY_KEY,
   BUNDLE_TENANT_ID,
   fetchJson,
+  fetchText,
   ORDERMONKEY_ORIGIN,
   readHeaders,
+  SHIPPED_BUNDLE_KEYS,
   USER_AGENT,
 } from "./http.js";
-export type { FetchJsonResult, JsonFailure, JsonResult } from "./http.js";
+export type { BundleKeys, FetchJsonResult, FetchTextResult, JsonFailure, JsonResult } from "./http.js";
 export { localizedText, translationsText } from "./localize.js";
 export type { NameTranslations } from "./localize.js";
 export {

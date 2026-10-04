@@ -1,5 +1,13 @@
 import { OrderMonkeyError } from "./error.js";
-import { fetchJson, ORDERMONKEY_ORIGIN, readHeaders, type FetchJsonResult } from "./http.js";
+import { recoverBundleConstants } from "./bundle.js";
+import {
+  fetchJson,
+  ORDERMONKEY_ORIGIN,
+  readHeaders,
+  SHIPPED_BUNDLE_KEYS,
+  type BundleKeys,
+  type FetchJsonResult,
+} from "./http.js";
 import { translationsText, type NameTranslations } from "./localize.js";
 import {
   discountsFromPayload,
@@ -94,8 +102,16 @@ function unavailableDisplayMode(raw: string | null | undefined): UnavailableDisp
  * answers defaults, indistinguishable from random UUIDs), an unknown
  * product id, a failed menu surface. An EMPTY menu is data, not
  * absence: a takeaway-only branch serves no Dinein cards.
+ *
+ * Key rotation: a 401 triggers exactly ONE per-client recovery — the
+ * public constants are re-derived from the app bundle (index →
+ * main.<hash>.js, `recoverBundleConstants`) — and the refused read is
+ * retried once. A 401 that survives recovery surfaces as an error.
  */
 export class OrderMonkeyClient {
+  private bundleKeys: BundleKeys = SHIPPED_BUNDLE_KEYS;
+  private recoveryAttempted = false;
+
   constructor(private readonly options: ClientOptions = {}) {}
 
   private now(): Date {
@@ -103,10 +119,25 @@ export class OrderMonkeyClient {
   }
 
   private async get<T>(path: string, org: OrgId, branch: BranchId): Promise<FetchJsonResult<T>> {
-    return await fetchJson<T>(`${ORDERMONKEY_ORIGIN}${path}`, {
-      headers: readHeaders(org, branch),
+    const url = `${ORDERMONKEY_ORIGIN}${path}`;
+    const init = (keys: BundleKeys): RequestInit => ({
+      headers: readHeaders(org, branch, keys),
       signal: AbortSignal.timeout(20_000),
-    }, this.options.fetchImpl);
+    });
+    let result = await fetchJson<T>(url, init(this.bundleKeys), this.options.fetchImpl);
+    if (!result.ok && result.kind === "http" && result.status === 401) {
+      result = await fetchJson<T>(url, init(await this.recoverBundleKeys()), this.options.fetchImpl);
+    }
+    return result;
+  }
+
+  private async recoverBundleKeys(): Promise<BundleKeys> {
+    if (this.recoveryAttempted) {
+      throw new Error("read refused: HTTP 401 after bundle key recovery — constants rotated again?");
+    }
+    this.recoveryAttempted = true;
+    this.bundleKeys = await recoverBundleConstants(this.options.fetchImpl ?? fetch);
+    return this.bundleKeys;
   }
 
   /**
