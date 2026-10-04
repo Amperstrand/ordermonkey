@@ -14,11 +14,15 @@ Rules:
   accounts). CreateSalesOrder / AuthorizePayment / SendOrderToPos stay
   documented, not implemented. Payment boundary for real orders: a
   hosted checkout a human opens (mcp-cashu-exchange docs/PAYMENT.md).
-- Phase-3 staging policy (orchestrator, 2026-10-04): test surfaces ONLY —
-  the vendor demo branch ("Website Demo" 6447fb68…, no real kitchen, PSP
-  redirect goes to Saferpay TEST) and abort-at-boundary orders. NEVER
-  pay-at-counter/cash orders at real venues: a real kitchen would make
-  real food.
+- Phase-3 staging policy (orchestrator, 2026-10-04, refined same day):
+  NO real orders for now — orders go to test endpoints / test shops
+  only (the demo allowlist + Saferpay TEST + abort-at-boundary). The
+  noted FUTURE exception — a mechanically closed venue plus a trivial
+  basket ("just a coke") — requires ALL of:
+  `isClosedForOrders(availability)` true (every mode unavailable AND no
+  future NextAvailableTime — a pre-order window still makes food later),
+  a single drink-class item, and explicit orchestrator sign-off for that
+  run. The demo-only allowlist stands until then.
 - Public repo: never commit card numbers, HAR/pcap/logs, cookies, captured
   payloads, personal data, or venue keys from public bundles. Fakes are
   synthetic. Commit via `sh scripts/git-commit.sh`; CI runs the leak scan.

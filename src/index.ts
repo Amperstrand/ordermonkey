@@ -1,3 +1,5 @@
+export { availabilityFromPayload, isClosedForOrders } from "./availability.js";
+export type { BranchAvailability, OrderKind, RawAvailability, ScheduleWindow } from "./availability.js";
 export { OrderMonkeyClient, type Branch, type ClientOptions } from "./client.js";
 export { recoverBundleConstants } from "./bundle.js";
 export { asTransportError, OrderMonkeyError } from "./error.js";

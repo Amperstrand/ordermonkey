@@ -14,13 +14,25 @@ hosted PSP redirect (SIX / ADYEN-ONLINE …) a human opens. The anonymous
 not implemented. Payment endpoints additionally swap the key
 (PaymentApiKey) and rename the branch header to `OrganizationIdentifier`.
 
-Phase-3 staging policy (orchestrator, 2026-10-04): when order placement
-is ever built, it runs against **test surfaces only** — the vendor demo
-branch ("Website Demo" `6447fb68…`, no real kitchen, PSP redirect to
-Saferpay TEST) and abort-at-boundary orders (proven to leave no
-retrievable artifact). **Never pay-at-counter orders at real venues** —
-a real kitchen would make real food. The demo branch is watched by the
-weekly smoke as the staging target.
+Phase-3 staging policy (orchestrator, 2026-10-04, refined same day):
+**no real orders for now** — orders go to test endpoints / test shops
+only (the vendor-demo allowlist above + Saferpay TEST +
+abort-at-boundary). A noted *future* exception — a mechanically closed
+venue plus a trivial basket ("just a coke") — requires all of:
+`isClosedForOrders(availability)` verified true, a single drink-class
+item, and explicit orchestrator sign-off for that run. The pre-order
+trap is why the check is strict: a venue that opens (or accepts
+pre-orders) tomorrow would still make the food then.
+
+## Availability (the closed-venue fact)
+
+`client.availability(branch)` reads `CheckBranchAvailability` — the same
+probe the SPA fires on page load (empty-body POST, four read headers, no
+session). Five per-mode schedule windows come back with the platform's
+epoch-zero null sentinel (`IsAvailable:true` + zero times = not
+hour-gated). `isClosedForOrders(availability)` is the mechanical
+precondition the closed-venue exception would need: every mode
+unavailable AND no future `NextAvailableTime` anywhere.
 
 ## Staged order lane (library-only, policy-gated)
 
@@ -192,6 +204,14 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   zero charge, zero persistent order (the recon's boundary proof:
   aborted PSP redirects leave no retrievable sales order and never fire
   `SendOrderToPos`).
+
+- **availability, live (2026-10-04, ~01:30 CET)** — Website Demo and Le
+  Thai read fully available (not hour-gated); Crustopia Luzern reads
+  dine-in/takeaway CLOSED for the night with a next-window scheduled —
+  and `isClosedForOrders` correctly answers **false** (preorder still
+  accepted ⇒ food would be made later). Their `NextAvailableTime` even
+  carries a stale 2024 date — more reason the closed-venue check must be
+  conservative, not presence-based.
 
 ## Repo rules
 

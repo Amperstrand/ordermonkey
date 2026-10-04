@@ -74,6 +74,8 @@ export interface FakeOrderMonkeyOptions {
   readonly rotatedKeys?: { readonly gatewayKey: string; readonly tenantId: string };
   /** Host the MakePayment fake redirects to (default: the Saferpay TEST host). */
   readonly paymentRedirectHost?: string;
+  /** Availability shape for CheckBranchAvailability (default: open/not-hour-gated). */
+  readonly availability?: "open" | "closed" | "closed-with-preorder";
 }
 
 const SYNTHETIC_MAIN = "/main.a1b2c3d4e5f60718.js";
@@ -667,6 +669,31 @@ export function fakeOrderMonkey(options: FakeOrderMonkeyOptions = {}): {
         return jsonResponse(envelope(webshopConfig));
       }
       return jsonResponse(notFoundEnvelope(), {}, 404);
+    }
+    if (path.endsWith("/CmsGateway/Command/CheckBranchAvailability") && method === "POST") {
+      const shape = options.availability ?? "open";
+      const window = (available: boolean, nextTime = "0001-01-01T00:00:00", dayName = ""): Record<string, unknown> => ({
+        IsAvailable: available,
+        NextAvailableTime: nextTime,
+        NextAvailableClosingTime: "0001-01-01T00:00:00",
+        OpeningTime: "0001-01-01T00:00:00",
+        ClosingTime: "0001-01-01T00:00:00",
+        NextAvailableDayName: dayName,
+      });
+      const preorder =
+        shape === "closed-with-preorder"
+          ? window(false, "2026-10-05T11:30:00", "Monday")
+          : window(shape === "open");
+      return jsonResponse(
+        envelope({
+          DineInOpeningHoursSchedule: window(shape === "open"),
+          TakeawayOpeningHoursSchedule: window(shape === "open"),
+          PreorderOpeningHoursSchedule: preorder,
+          CateringOpeningHoursSchedule: window(false),
+          DeliveryOpeningHoursSchedule: window(false),
+          IsLoyaltyEnabled: false,
+        }),
+      );
     }
     const fixture = BRANCHES.find((candidate) => candidate.branch === headers["branchid"]);
     if (fixture === undefined || headers["organizationid"] !== fixture.org) {

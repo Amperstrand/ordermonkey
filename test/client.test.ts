@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUNDLE_GATEWAY_KEY, BUNDLE_TENANT_ID, OrderMonkeyClient, OrderMonkeyError } from "../src/index.js";
+import { BUNDLE_GATEWAY_KEY, BUNDLE_TENANT_ID, isClosedForOrders, OrderMonkeyClient, OrderMonkeyError } from "../src/index.js";
 import {
   fakeOrderMonkey,
   HIDEOUT_ORG,
@@ -290,6 +290,54 @@ describe("bundle key rotation", () => {
   });
 });
 
+
+describe("availability", () => {
+  it("posts the SPA's page-load probe: empty body, four read headers, no session", async () => {
+    const transport = fakeOrderMonkey();
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    const availability = await client(transport.fetchImpl).availability(branch!);
+    expect(availability).not.toBeNull();
+    const request = transport.requests.find((r) => r.url.includes("CheckBranchAvailability"));
+    expect(request?.method).toBe("POST");
+    expect(request?.body).toBe("{}");
+    expect(request?.headers["authorization"]).toBeUndefined();
+    expect(request?.headers["apikey"]).toBe(BUNDLE_GATEWAY_KEY);
+    expect(request?.headers["organizationid"]).toBe(LIVE_ORG);
+  });
+
+  it("parses open/not-hour-gated windows (epoch-zero times become null)", async () => {
+    const transport = fakeOrderMonkey();
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    const availability = await client(transport.fetchImpl).availability(branch!);
+    expect(availability?.takeaway).toEqual({
+      available: true,
+      nextAvailableTime: null,
+      nextAvailableClosingTime: null,
+      openingTime: null,
+      closingTime: null,
+      nextAvailableDayName: null,
+    });
+    expect(isClosedForOrders(availability!)).toBe(false);
+  });
+
+  it("a fully closed venue (all modes false, epoch-zero) is closed for orders", async () => {
+    const transport = fakeOrderMonkey({ availability: "closed" });
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    const availability = await client(transport.fetchImpl).availability(branch!);
+    expect(availability?.dineIn.available).toBe(false);
+    expect(isClosedForOrders(availability!)).toBe(true);
+  });
+
+  it("the pre-order trap: a future NextAvailableTime means NOT closed — food would be made later", async () => {
+    const transport = fakeOrderMonkey({ availability: "closed-with-preorder" });
+    const branch = await client(transport.fetchImpl).branch(LIVE_ORG, LIVE_BRANCH);
+    const availability = await client(transport.fetchImpl).availability(branch!);
+    expect(availability?.preorder.available).toBe(false);
+    expect(availability?.preorder.nextAvailableTime).toBe("2026-10-05T11:30:00");
+    expect(availability?.preorder.nextAvailableDayName).toBe("Monday");
+    expect(isClosedForOrders(availability!)).toBe(false);
+  });
+});
 
 describe("network errors vs null-absent (all read surfaces)", () => {
   it("menu rejects with OrderMonkeyError when the transport dies", async () => {

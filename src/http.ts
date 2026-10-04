@@ -80,6 +80,38 @@ export interface FormJsonResult<T> {
 
 export type PostFormJsonResult<T> = FormJsonResult<T> | JsonFailure;
 
+/** JSON POST returning parsed body or a status/body failure (no throw on HTTP errors). */
+export async function postJson<T>(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  fetchImpl: typeof fetch,
+): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly status: number; readonly body: string }> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    if (!isTransportFailure(error)) throw error;
+    return {
+      ok: false,
+      status: 0,
+      body: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const text = await response.text();
+  if (!response.ok) return { ok: false, status: response.status, body: text.slice(0, 500) };
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false, status: response.status, body: text.slice(0, 500) };
+  }
+}
+
 /** URL-encoded form POST returning JSON plus any Set-Cookie headers. */
 export async function postFormJson<T>(
   url: string,

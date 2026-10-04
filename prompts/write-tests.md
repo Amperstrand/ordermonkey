@@ -108,6 +108,12 @@ the wire contract, and stay leak-gate clean.
   exist" lessons: the QR config lacks MinimumOrderValue, the webshop
   config carries it (0 = none) — a typed-null quirk went stale the
   moment the second lane arrived.
+- "Closed" is a five-window AND with a trap: a venue can be closed for
+  dine-in AND takeaway right now yet still accept preorders — food gets
+  made at the next window (live proof: Crustopia at night, stale
+  2024-dated NextAvailableTime and all). Encode isClosedForOrders as
+  every-mode-unavailable AND no-future-window; assert the
+  closed-with-preorder fixture answers FALSE.
 - Order-lane safety is a choreography, not a flag: assert the exact
   request sequence from the log (token POST with Origin + form body,
   CreateStock with BranchId/Device-ID/bearer, MakePayment with the

@@ -1,6 +1,12 @@
 import type { Branch } from "./client.js";
 import { asTransportError } from "./error.js";
-import { BUNDLE_GATEWAY_KEY, BUNDLE_PAYMENT_KEY, BUNDLE_TENANT_ID, ORDERMONKEY_ORIGIN } from "./http.js";
+import {
+  BUNDLE_GATEWAY_KEY,
+  BUNDLE_PAYMENT_KEY,
+  BUNDLE_TENANT_ID,
+  ORDERMONKEY_ORIGIN,
+  postJson,
+} from "./http.js";
 import type { GuestSession } from "./session.js";
 import { anonymousSession } from "./session.js";
 
@@ -132,30 +138,10 @@ function paymentHeaders(branch: Branch): Record<string, string> {
   };
 }
 
-async function postJson<T>(
-  url: string,
-  body: unknown,
-  headers: Record<string, string>,
-  fetchImpl: typeof fetch,
-): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false; readonly status: number; readonly body: string }> {
-  let response: Response;
-  try {
-    response = await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch (error) {
-    throw asTransportError(error);
-  }
-  const text = await response.text();
-  if (!response.ok) return { ok: false, status: response.status, body: text.slice(0, 500) };
-  try {
-    return { ok: true, value: JSON.parse(text) as T };
-  } catch {
-    return { ok: false, status: response.status, body: text.slice(0, 500) };
-  }
+function refused(context: string, failure: { readonly status: number; readonly body: string }): Error {
+  return failure.status === 0
+    ? asTransportError(new Error(`${context}: ${failure.body}`))
+    : new Error(`${context}: HTTP ${failure.status}`);
 }
 
 async function releaseStockHold(
@@ -224,7 +210,9 @@ export async function stagedOrder(
     fetchImpl,
   );
   if (!stock.ok || stock.value.Errors?.IsValid !== true) {
-    throw new Error(`CreateStock refused: ${stock.ok ? `StatusCode ${stock.value.StatusCode ?? "?"}` : `HTTP ${stock.status}`}`);
+    throw stock.ok
+      ? new Error(`CreateStock refused: StatusCode ${stock.value.StatusCode ?? "?"}`)
+      : refused("CreateStock failed", stock);
   }
 
   let payment: RawMakePaymentResult;
@@ -245,7 +233,7 @@ export async function stagedOrder(
       paymentHeaders(branch),
       fetchImpl,
     );
-    if (!result.ok) throw new Error(`MakePayment refused: HTTP ${result.status}`);
+    if (!result.ok) throw refused("MakePayment failed", result);
     if (result.value.RedirectUrl === undefined || result.value.RedirectUrl === "") {
       throw new Error("MakePayment answered without a redirect URL");
     }

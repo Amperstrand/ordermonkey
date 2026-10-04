@@ -1,8 +1,11 @@
 import { OrderMonkeyError } from "./error.js";
 import { recoverBundleConstants } from "./bundle.js";
+import { availabilityFromPayload, type BranchAvailability, type RawAvailability } from "./availability.js";
 import {
   fetchJson,
   ORDERMONKEY_ORIGIN,
+  postJson,
+  readHeaders,
   USER_AGENT,
   SHIPPED_BUNDLE_KEYS,
   type BundleKeys,
@@ -36,6 +39,7 @@ import {
 
 const GATEWAY = "/api/business-fnb-gateway";
 const QUERY = `${GATEWAY}/CmsGateway/Query`;
+const QUERY_CHECK_AVAILABILITY = `${GATEWAY}/CmsGateway/Command/CheckBranchAvailability`;
 /** The product detail route deliberately sits OUTSIDE CmsGateway/Query. */
 const PRODUCT_DETAILS = `${GATEWAY}/GetProductDetailsByIdV2`;
 
@@ -301,6 +305,30 @@ export class OrderMonkeyClient {
     options: StagedOrderOptions = {},
   ): Promise<StagedOrderResult> {
     return await stagedOrderFlow(branch, items, options, this.options.fetchImpl ?? fetch);
+  }
+
+  /**
+   * Reads the branch's availability windows (CheckBranchAvailability —
+   * the probe the SPA fires on page load; empty-body POST, four read
+   * headers, no session). Null when the platform answers the surface
+   * missing. See isClosedForOrders for the closed-venue policy fact.
+   */
+  async availability(target: Branch): Promise<BranchAvailability | null> {
+    const result = await postJson<RawAvailability>(
+      `${ORDERMONKEY_ORIGIN}${QUERY_CHECK_AVAILABILITY}`,
+      {},
+      {
+        ...readHeaders(target.orgId, target.branchId, this.bundleKeys),
+        "content-type": "application/json",
+      },
+      this.options.fetchImpl ?? fetch,
+    );
+    if (!result.ok) {
+      if (result.status === 0) throw network("availability read failed", result.body);
+      return null;
+    }
+    if (result.value.IsSuccess === false) return null;
+    return availabilityFromPayload(result.value);
   }
 
   /**
