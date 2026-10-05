@@ -2,7 +2,7 @@ import { isTransportFailure } from "./error.js";
 import type { BranchId, OrgId } from "./types.js";
 
 export const ORDERMONKEY_ORIGIN = "https://app.ordermonkey.com";
-export const USER_AGENT = "ordermonkey/0.1";
+export const USER_AGENT = "ordermonkey/0.2";
 
 /**
  * Public platform constants every app bundle ships (spec fingerprint

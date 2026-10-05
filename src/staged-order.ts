@@ -115,7 +115,7 @@ function commandHeaders(
   branchHeader: "BranchId" | "BranchUUID",
 ): Record<string, string> {
   return {
-    "user-agent": "ordermonkey/0.1",
+    "user-agent": "ordermonkey/0.2",
     accept: "application/json",
     "content-type": "application/json",
     ApiKey: BUNDLE_GATEWAY_KEY,
