@@ -46,10 +46,12 @@ const PRODUCT_DETAILS = `${GATEWAY}/GetProductDetailsByIdV2`;
 interface RawBranchConfiguration {
   readonly SetupStatus?: string | null;
   readonly PaymentProviders?: readonly string[] | null;
-  readonly TransactionFeePercentage?: number | null;
-  readonly TableNumbers?: readonly number[] | null;
+  /** Number on every capture so far, but string forms exist on the wire — coerced. */
+  readonly TransactionFeePercentage?: number | string | null;
+  readonly TableNumbers?: readonly (string | number)[] | null;
   readonly IsTableNumberMandatory?: boolean;
   readonly UnavailableProductDisplayMode?: string | null;
+  readonly IsCashPaymentAvailable?: boolean | null;
   /** Webshop-config-only keys (absent from the QR-app config). */
   readonly MinimumOrderValue?: number | null;
   readonly MinimumOrderType?: string | null;
@@ -86,9 +88,11 @@ export interface Branch {
   readonly defaultLanguage: string | null;
   readonly paymentProviders: readonly string[];
   readonly transactionFeePercentage: number | null;
+  /** Cash-at-counter flag (IsCashPaymentAvailable) — carried on BOTH config lanes. */
+  readonly cashPaymentAvailable: boolean | null;
   readonly unavailableProductDisplayMode: UnavailableDisplayMode | null;
   readonly isTableNumberMandatory: boolean;
-  readonly tableNumbers: readonly number[];
+  readonly tableNumbers: readonly (string | number)[];
   /**
    * QR-lane configs carry NO min-order field (always null here). Webshop
    * configs DO carry MinimumOrderValue — 0 means none published.
@@ -207,6 +211,8 @@ export class OrderMonkeyClient {
     if (!brand.ok && brand.kind === "network") throw network("brand read failed", brand.body);
     const brandData = brand.ok ? brand.value.Data : undefined;
     const configData = config.ok ? config.value.Data : undefined;
+    const rawFee = configData?.TransactionFeePercentage;
+    const fee = rawFee === undefined || rawFee === null ? null : Number(rawFee);
 
     return {
       orgId: org,
@@ -218,7 +224,8 @@ export class OrderMonkeyClient {
       currency: brandData?.Currency ?? "CHF",
       defaultLanguage: identity.defaultLanguage ?? brandData?.DefaultLanguage ?? null,
       paymentProviders: [...(configData?.PaymentProviders ?? [])],
-      transactionFeePercentage: configData?.TransactionFeePercentage ?? null,
+      transactionFeePercentage: fee !== null && Number.isFinite(fee) ? fee : null,
+      cashPaymentAvailable: configData?.IsCashPaymentAvailable ?? null,
       unavailableProductDisplayMode: unavailableDisplayMode(configData?.UnavailableProductDisplayMode),
       isTableNumberMandatory: configData?.IsTableNumberMandatory === true,
       tableNumbers: [...(configData?.TableNumbers ?? [])],

@@ -49,6 +49,21 @@ describe("branch", () => {
     });
   });
 
+  it("carries the cash flag from either lane, coerces string fees, widens table numbers", async () => {
+    const transport = fakeOrderMonkey();
+    const c = client(transport.fetchImpl);
+    const leThaiLike = await c.branch(LIVE_ORG, LIVE_BRANCH);
+    expect(leThaiLike?.cashPaymentAvailable).toBe(true);
+    const hideout = await c.branch(HIDEOUT_ORG, "e4f5061728394a5b6c7d8e9fa0b1c2d3");
+    expect(hideout?.cashPaymentAvailable).toBe(false);
+    expect(hideout?.transactionFeePercentage).toBe(1);
+    const demo = await c.branch("6447fb68-86a5-4448-ba4f-a54c1dfd99eb", "7d818c40a47e4b428d566ab248b822ec");
+    expect(demo?.tableNumbers).toEqual([1, 2, 110]);
+    const venue = await c.webshop(WEBSHOP_SLUG);
+    const webshopBranch = await c.webshopBranch(venue!);
+    expect(webshopBranch?.cashPaymentAvailable).toBe(false);
+  });
+
   it("tier-2 surface-dead: config 404 but org name real — config-404 is NOT deletion", async () => {
     const transport = fakeOrderMonkey();
     const branch = await client(transport.fetchImpl).branch(TIER2_ORG, TIER2_BRANCH);

@@ -158,6 +158,10 @@ branch serves no Dinein cards (retry with `--type Takeaway`).
   `PaymentProviderType` ("cloud") differs from the config's
   `PaymentProviders`. `GetWebShopConfiguration` hard-requires BranchId
   (org-only → HTTP 400) and answers on BOTH origins.
+- `branch.cashPaymentAvailable` (`IsCashPaymentAvailable`) rides on BOTH
+  config lanes — Le Thai is the cash-on worked example; the transaction
+  fee is coerced (string forms exist on the wire); `TableNumbers` may
+  mix strings and numbers.
 
 ## Verification (live, 2026-10-03)
 

@@ -48,6 +48,18 @@ const WORKED_WEBSHOPS = [
     tier: "live",
     minItems: 50,
   },
+  {
+    name: "Sushi Hanabi (webshop lane)",
+    slug: "sushi-hanabi",
+    tier: "live",
+    minItems: 60,
+  },
+  {
+    name: "Wild Chik'n (webshop lane)",
+    slug: "wild-popup",
+    tier: "live",
+    minItems: 25,
+  },
 ];
 
 const DEAD_PAIR = {
